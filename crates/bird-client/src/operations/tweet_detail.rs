@@ -1,11 +1,9 @@
 //! Tweet detail fetching implementation.
 
+use crate::client::TwitterClient;
 use crate::constants::Operation;
-use crate::error::{Error, Result};
-use crate::types::{MediaType, TweetArticle, TweetAuthor, TweetData, TweetMedia};
+use bird_core::{Error, MediaType, Result, TweetArticle, TweetAuthor, TweetData, TweetMedia};
 use serde_json::{json, Value};
-
-use super::TwitterClient;
 
 impl TwitterClient {
     /// Fetch a tweet by ID.
@@ -20,7 +18,8 @@ impl TwitterClient {
         let url = self.build_graphql_url(Operation::TweetDetail, &variables);
         let headers = self.get_headers();
 
-        let response = self.http_client.get(&url).headers(headers).send().await?;
+        let response = self.http_client.get(&url).headers(headers).send().await
+            .map_err(|e| Error::HttpRequest(e.to_string()))?;
 
         if response.status() == 404 {
             return Err(Error::TweetNotFound(tweet_id.to_string()));
@@ -34,7 +33,8 @@ impl TwitterClient {
             return Err(Error::ApiError(format!("HTTP {}", response.status())));
         }
 
-        let json: Value = response.json().await?;
+        let json: Value = response.json().await
+            .map_err(|e| Error::JsonParse(e.to_string()))?;
 
         // Check for API errors
         if let Some(errors) = json.get("errors").and_then(|e| e.as_array()) {
@@ -67,7 +67,7 @@ fn parse_tweet_from_response(json: &Value, tweet_id: &str, quote_depth: u32) -> 
 }
 
 /// Parse a tweet result object.
-fn parse_tweet_result(
+pub(crate) fn parse_tweet_result(
     result: &Value,
     max_quote_depth: u32,
     current_depth: u32,
@@ -318,4 +318,48 @@ fn parse_article(tweet_result: &Value) -> Option<TweetArticle> {
         title,
         preview_text,
     })
+}
+
+/// Parse timeline entries to extract tweets and cursor.
+pub(crate) fn parse_timeline_entries(
+    entries: &[Value],
+    quote_depth: u32,
+) -> (Vec<TweetData>, Option<String>) {
+    let mut tweets = Vec::new();
+    let mut next_cursor = None;
+
+    for entry in entries {
+        let entry_type = entry
+            .get("entryId")
+            .and_then(|e| e.as_str())
+            .unwrap_or("");
+
+        // Handle cursor entries
+        if entry_type.starts_with("cursor-bottom") {
+            next_cursor = entry
+                .pointer("/content/value")
+                .or_else(|| entry.pointer("/content/itemContent/value"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            continue;
+        }
+
+        // Skip non-tweet entries
+        if !entry_type.starts_with("tweet-") && !entry_type.starts_with("list-tweet-") {
+            continue;
+        }
+
+        // Extract tweet from entry
+        let tweet_result = entry
+            .pointer("/content/itemContent/tweet_results/result")
+            .or_else(|| entry.pointer("/content/content/tweetResult/result"));
+
+        if let Some(result) = tweet_result {
+            if let Ok(tweet) = parse_tweet_result(result, quote_depth, 0) {
+                tweets.push(tweet);
+            }
+        }
+    }
+
+    (tweets, next_cursor)
 }

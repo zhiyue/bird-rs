@@ -1,26 +1,27 @@
-[package]
-name = "bird"
+[workspace]
+resolver = "2"
+members = [
+    "crates/bird-core",
+    "crates/bird-client",
+    "crates/bird-storage",
+    "crates/bird-cli",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
 authors = ["Kevin Chen"]
-description = "A fast X/Twitter CLI for reading tweets, powered by GraphQL"
 license = "MIT"
 repository = "https://github.com/kevinmichaelchen/bird-rs"
-keywords = ["twitter", "x", "cli", "graphql", "social-media"]
-categories = ["command-line-utilities", "web-programming"]
 
-[[bin]]
-name = "bird"
-path = "src/main.rs"
+[workspace.dependencies]
+# Internal crates
+bird-core = { path = "crates/bird-core" }
+bird-client = { path = "crates/bird-client" }
+bird-storage = { path = "crates/bird-storage" }
 
-[dependencies]
-# CLI
-clap = { version = "4", features = ["derive", "env"] }
-
-# HTTP client
-reqwest = { version = "0.12", features = ["json", "cookies"] }
-
-# Async runtime
+# Async
+async-trait = "0.1"
 tokio = { version = "1", features = ["full"] }
 
 # Serialization
@@ -31,20 +32,28 @@ serde_json = "1"
 thiserror = "2"
 anyhow = "1"
 
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "cookies"] }
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+colored = "2"
+
 # Cookie extraction
 sweet-cookie = { path = "../sweet-cookie-rs" }
 
+# Database
+surrealdb = { version = "2", features = ["kv-rocksdb"] }
+
 # Utilities
 uuid = { version = "1", features = ["v4"] }
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 url = "2"
 urlencoding = "2"
 regex = "1"
 getrandom = "0.2"
+dirs = "5"
 
-# Output formatting
-colored = "2"
-
-[dev-dependencies]
+# Dev dependencies
 tempfile = "3"
 tokio-test = "0.4"

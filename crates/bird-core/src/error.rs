@@ -18,11 +18,11 @@ pub enum Error {
 
     /// HTTP request failed.
     #[error("HTTP request failed: {0}")]
-    HttpRequest(#[from] reqwest::Error),
+    HttpRequest(String),
 
     /// JSON parsing failed.
     #[error("Failed to parse JSON response: {0}")]
-    JsonParse(#[from] serde_json::Error),
+    JsonParse(String),
 
     /// Invalid URL provided.
     #[error("Invalid URL: {0}")]
@@ -51,4 +51,28 @@ pub enum Error {
     /// Invalid tweet ID format.
     #[error("Invalid tweet ID: {0}")]
     InvalidTweetId(String),
+
+    /// Storage error.
+    #[error("Storage error: {0}")]
+    Storage(String),
+
+    /// Serialization error.
+    #[error("Serialization error: {0}")]
+    Serialization(String),
+
+    /// IO error.
+    #[error("IO error: {0}")]
+    Io(String),
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(e: serde_json::Error) -> Self {
+        Error::JsonParse(e.to_string())
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Error::Io(e.to_string())
+    }
 }

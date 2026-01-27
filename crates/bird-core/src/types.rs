@@ -218,3 +218,49 @@ pub enum FollowingResult {
     /// Failed to fetch the list.
     Error(String),
 }
+
+/// Collection type for categorizing tweets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Collection {
+    /// User's liked tweets.
+    Likes,
+    /// User's bookmarked tweets.
+    Bookmarks,
+    /// User's home timeline.
+    Timeline,
+    /// User's own tweets.
+    UserTweets,
+}
+
+impl Collection {
+    /// Get the collection name as a string.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Collection::Likes => "likes",
+            Collection::Bookmarks => "bookmarks",
+            Collection::Timeline => "timeline",
+            Collection::UserTweets => "user_tweets",
+        }
+    }
+}
+
+impl std::fmt::Display for Collection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for Collection {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "likes" => Ok(Collection::Likes),
+            "bookmarks" => Ok(Collection::Bookmarks),
+            "timeline" => Ok(Collection::Timeline),
+            "user_tweets" => Ok(Collection::UserTweets),
+            _ => Err(format!("Unknown collection: {}", s)),
+        }
+    }
+}

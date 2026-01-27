@@ -1,6 +1,6 @@
 //! Cookie extraction and credential resolution.
 
-use crate::error::{Error, Result};
+use bird_core::{Error, Result};
 
 /// Twitter authentication cookies.
 #[derive(Debug, Clone)]

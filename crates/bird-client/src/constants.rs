@@ -21,6 +21,9 @@ pub const BEARER_TOKEN: &str = "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejR
 /// Default user agent string.
 pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
+/// Default count for paginated requests.
+pub const DEFAULT_PAGE_COUNT: u32 = 20;
+
 /// GraphQL operation names and their query IDs.
 /// Note: These IDs rotate frequently and may need updating.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

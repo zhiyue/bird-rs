@@ -1,6 +1,6 @@
 //! Output formatting for CLI.
 
-use crate::types::{CurrentUser, TweetData, TwitterUser};
+use bird_client::{CurrentUser, MediaType, TweetData, TwitterUser};
 use colored::Colorize;
 
 /// Format a tweet for text output.
@@ -60,9 +60,9 @@ pub fn format_tweet(tweet: &TweetData, show_emoji: bool) -> String {
         for m in media {
             let icon = if show_emoji {
                 match m.media_type {
-                    crate::types::MediaType::Photo => "📷 ",
-                    crate::types::MediaType::Video => "🎬 ",
-                    crate::types::MediaType::AnimatedGif => "🎞️ ",
+                    MediaType::Photo => "📷 ",
+                    MediaType::Video => "🎬 ",
+                    MediaType::AnimatedGif => "🎞️ ",
                 }
             } else {
                 ""
@@ -163,7 +163,56 @@ pub fn format_user(user: &TwitterUser, show_emoji: bool) -> String {
     output
 }
 
+/// Format a list of tweets for text output.
+pub fn format_tweets(tweets: &[TweetData], show_emoji: bool) -> String {
+    let mut output = String::new();
+
+    for (i, tweet) in tweets.iter().enumerate() {
+        if i > 0 {
+            output.push_str(&"─".repeat(40).dimmed().to_string());
+            output.push('\n');
+        }
+        output.push_str(&format_tweet(tweet, show_emoji));
+    }
+
+    output
+}
+
 /// Format output as JSON.
 pub fn format_json<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Format a summary line for paginated results.
+pub fn format_pagination_summary(
+    count: usize,
+    total_fetched: usize,
+    has_more: bool,
+    next_cursor: Option<&str>,
+    show_emoji: bool,
+) -> String {
+    let mut parts = Vec::new();
+
+    let icon = if show_emoji { "📊 " } else { "" };
+    parts.push(format!("{}Showing {} tweets", icon, count));
+
+    if total_fetched > count {
+        parts.push(format!("({} total fetched)", total_fetched));
+    }
+
+    if has_more {
+        parts.push("more available".to_string());
+    }
+
+    let mut output = parts.join(" · ").dimmed().to_string();
+
+    if let Some(cursor) = next_cursor {
+        output.push_str(&format!(
+            "\n{}Resume with: --cursor \"{}\"",
+            if show_emoji { "➡️ " } else { "" },
+            cursor
+        ).dimmed().to_string());
+    }
+
+    output
 }

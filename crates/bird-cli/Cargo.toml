@@ -1,0 +1,32 @@
+[package]
+name = "bird-cli"
+description = "A fast X/Twitter CLI for reading tweets, powered by GraphQL"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["twitter", "x", "cli", "graphql", "social-media"]
+categories = ["command-line-utilities", "web-programming"]
+
+[[bin]]
+name = "bird"
+path = "src/main.rs"
+
+[dependencies]
+bird-core.workspace = true
+bird-client.workspace = true
+bird-storage.workspace = true
+clap.workspace = true
+colored.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+url.workspace = true
+dirs.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio-test.workspace = true

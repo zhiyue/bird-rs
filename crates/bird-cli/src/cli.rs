@@ -26,6 +26,7 @@ use std::sync::Arc;
   bird bookmarks --max-pages 5   Fetch up to 5 pages of bookmarks
   bird sync likes                Sync likes to local database
   bird db backfill-created-at    Backfill created_at_ts for existing tweets
+  bird --config ~/.bird/config.toml sync likes
   bird sync status               Show sync state")]
 pub struct Cli {
     #[command(subcommand)]
@@ -603,6 +604,31 @@ pub fn extract_tweet_id(input: &str) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
+
+    fn base_cli() -> Cli {
+        Cli {
+            command: None,
+            auth_token: None,
+            ct0: None,
+            timeout: 30000,
+            quote_depth: 1,
+            json: false,
+            plain: false,
+            no_emoji: false,
+            no_cache: false,
+            config: None,
+            db_path: None,
+            storage: None,
+            db_url: None,
+            db_namespace: None,
+            db_name: None,
+            db_auth: None,
+            db_user: None,
+            db_pass: None,
+            tweet_id: None,
+        }
+    }
 
     #[test]
     fn test_extract_tweet_id_bare() {
@@ -639,5 +665,76 @@ mod tests {
     #[test]
     fn test_extract_tweet_id_invalid() {
         assert!(extract_tweet_id("not-a-valid-id").is_err());
+    }
+
+    #[test]
+    fn test_storage_config_from_file_surrealdb() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[storage]
+backend = "surrealdb"
+db_url = "wss://cloud.surrealdb.com"
+namespace = "bird"
+database = "main"
+auth = "root"
+user = "alice"
+pass = "secret"
+"#,
+        )
+        .unwrap();
+
+        let mut cli = base_cli();
+        cli.config = Some(path);
+
+        match cli.storage_config().unwrap() {
+            StorageConfig::SurrealDb(cfg) => {
+                assert_eq!(cfg.endpoint, "wss://cloud.surrealdb.com");
+                assert_eq!(cfg.namespace, "bird");
+                assert_eq!(cfg.database, "main");
+                let auth = cfg.auth.unwrap();
+                match auth {
+                    SurrealDbAuth::Root { username, password } => {
+                        assert_eq!(username, "alice");
+                        assert_eq!(password, "secret");
+                    }
+                    _ => panic!("unexpected auth mode"),
+                }
+            }
+            StorageConfig::Memory => panic!("expected surrealdb config"),
+        }
+    }
+
+    #[test]
+    fn test_storage_config_cli_overrides_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[storage]
+backend = "surrealdb"
+db_url = "wss://cloud.surrealdb.com"
+namespace = "bird"
+database = "main"
+"#,
+        )
+        .unwrap();
+
+        let mut cli = base_cli();
+        cli.config = Some(path);
+        cli.db_url = Some("ws://localhost:8000".to_string());
+        cli.db_namespace = Some("override".to_string());
+
+        match cli.storage_config().unwrap() {
+            StorageConfig::SurrealDb(cfg) => {
+                assert_eq!(cfg.endpoint, "ws://localhost:8000");
+                assert_eq!(cfg.namespace, "override");
+                assert_eq!(cfg.database, "main");
+            }
+            StorageConfig::Memory => panic!("expected surrealdb config"),
+        }
     }
 }

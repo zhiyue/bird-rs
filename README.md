@@ -154,6 +154,12 @@ cargo test --workspace
 cargo clippy --all-targets -- -D warnings
 ```
 
+Enable the pre-commit hook (runs fmt/clippy/test):
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ## License
 
 MIT

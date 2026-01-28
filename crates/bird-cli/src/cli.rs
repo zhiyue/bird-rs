@@ -1,6 +1,6 @@
 //! CLI interface for bird.
 
-use crate::commands::{bookmarks, db, likes, list, read, sync, whoami};
+use crate::commands::{bookmarks, config, db, likes, list, read, sync, whoami};
 use bird_client::cookies::{check_available_sources, resolve_credentials};
 use bird_client::{Collection, TwitterClient, TwitterClientOptions};
 use bird_storage::{
@@ -27,6 +27,7 @@ use std::sync::Arc;
   bird sync likes                Sync likes to local database
   bird db backfill-created-at    Backfill created_at_ts for existing tweets
   bird --config ~/.bird/config.toml sync likes
+  bird config init               Create a default config file
   bird sync status               Show sync state")]
 pub struct Cli {
     #[command(subcommand)]
@@ -213,6 +214,12 @@ enum Commands {
         #[command(subcommand)]
         action: DbAction,
     },
+
+    /// Config file utilities.
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -306,6 +313,17 @@ enum DbAction {
         #[arg(long)]
         batch_size: Option<u32>,
     },
+
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Create a default config file.
+    Init {
+        /// Overwrite existing config file.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 impl Cli {
@@ -388,6 +406,9 @@ impl Cli {
                     db::run_backfill_created_at(&self, *batch_size, show_emoji).await
                 }
             },
+            Some(Commands::Config { action }) => match action {
+                ConfigAction::Init { force } => config::run_init(&self, *force, show_emoji).await,
+            },
             None => {
                 // Check for shorthand tweet ID
                 if let Some(tweet_id) = &self.tweet_id {
@@ -435,7 +456,7 @@ impl Cli {
         }))
     }
 
-    fn config_path(&self) -> PathBuf {
+    pub(crate) fn config_path(&self) -> PathBuf {
         self.config.clone().unwrap_or_else(default_config_path)
     }
 

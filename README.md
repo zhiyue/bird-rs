@@ -41,6 +41,7 @@ bird sync likes
 | `bird sync posts`     | Sync your own tweets to DB    |
 | `bird sync status`    | Show sync progress            |
 | `bird db backfill-created-at` | Backfill created_at_ts for stored tweets |
+| `bird config init`    | Write a default config file   |
 
 ## Sync
 
@@ -115,6 +116,14 @@ pass = "your_pass"
 ```
 
 For local storage, you can set `db_path` instead of `db_url`.
+
+Generate a starter config with:
+
+```bash
+bird config init
+# Overwrite existing file
+bird config init --force
+```
 
 ## Migrations
 

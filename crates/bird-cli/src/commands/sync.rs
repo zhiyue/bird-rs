@@ -4,7 +4,6 @@ use crate::cli::Cli;
 use crate::output::format_json;
 use crate::sync_engine::{SyncEngine, SyncOptions};
 use bird_client::{Collection, CurrentUserResult, RateLimitConfig};
-use bird_storage::SyncStateStore;
 use chrono::Utc;
 use colored::Colorize;
 
@@ -113,7 +112,9 @@ pub async fn run_backfill(
     let engine = SyncEngine::new(client, storage);
 
     // Run backfill
-    let result = engine.backfill_collection(collection, &user_id, &options).await?;
+    let result = engine
+        .backfill_collection(collection, &user_id, &options)
+        .await?;
 
     // Output results
     output_sync_result(cli, &collection, &result, show_emoji);
@@ -165,7 +166,9 @@ async fn run_sync(
     let engine = SyncEngine::new(client, storage);
 
     // Run sync
-    let result = engine.sync_collection(collection, &user_id, &options).await?;
+    let result = engine
+        .sync_collection(collection, &user_id, &options)
+        .await?;
 
     // Output results
     output_sync_result(cli, &collection, &result, show_emoji);
@@ -307,11 +310,7 @@ pub async fn run_status(cli: &Cli, show_emoji: bool) -> anyhow::Result<()> {
             }
         } else {
             let complete_icon = if show_emoji { "✅ " } else { "" };
-            println!(
-                "    {}Backfill: {}",
-                complete_icon,
-                "complete".green()
-            );
+            println!("    {}Backfill: {}", complete_icon, "complete".green());
         }
 
         println!();

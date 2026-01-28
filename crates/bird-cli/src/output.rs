@@ -207,11 +207,15 @@ pub fn format_pagination_summary(
     let mut output = parts.join(" · ").dimmed().to_string();
 
     if let Some(cursor) = next_cursor {
-        output.push_str(&format!(
-            "\n{}Resume with: --cursor \"{}\"",
-            if show_emoji { "➡️ " } else { "" },
-            cursor
-        ).dimmed().to_string());
+        output.push_str(
+            &format!(
+                "\n{}Resume with: --cursor \"{}\"",
+                if show_emoji { "➡️ " } else { "" },
+                cursor
+            )
+            .dimmed()
+            .to_string(),
+        );
     }
 
     output

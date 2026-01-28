@@ -3,7 +3,6 @@
 use crate::cli::Cli;
 use crate::output::format_json;
 use bird_client::{CurrentUserResult, TweetData};
-use bird_storage::TweetStore;
 use chrono::{DateTime, Local};
 use colored::Colorize;
 
@@ -66,11 +65,7 @@ pub async fn run(
     println!();
     println!(
         "{}",
-        format!(
-            "Page {}/{} ({} total tweets)",
-            page, total_pages, total
-        )
-        .dimmed()
+        format!("Page {}/{} ({} total tweets)", page, total_pages, total).dimmed()
     );
 
     if page > 1 || (page as u64) < total_pages {
@@ -82,11 +77,7 @@ pub async fn run(
         if (page as u64) < total_pages {
             nav_parts.push(format!("--page {}", page + 1));
         }
-        println!(
-            "{}Navigate: {}",
-            nav_hint,
-            nav_parts.join(" | ").dimmed()
-        );
+        println!("{}Navigate: {}", nav_hint, nav_parts.join(" | ").dimmed());
     }
 
     Ok(())
@@ -100,14 +91,11 @@ fn print_table_header(show_emoji: bool) {
 
     let icon = if show_emoji { "📋 " } else { "" };
     println!(
-        "{}{}",
+        "{}{:<20} {:<50} {}",
         icon,
-        format!(
-            "{:<20} {:<50} {}",
-            id_header.bold(),
-            text_header.bold(),
-            time_header.bold()
-        )
+        id_header.bold(),
+        text_header.bold(),
+        time_header.bold()
     );
     println!("{}", "─".repeat(90).dimmed());
 }

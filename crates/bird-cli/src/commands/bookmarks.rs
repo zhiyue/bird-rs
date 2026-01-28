@@ -37,23 +37,21 @@ pub async fn run(
 
     if cli.json() {
         println!("{}", format_json(&result.items));
+    } else if result.items.is_empty() {
+        println!("No bookmarks found.");
     } else {
-        if result.items.is_empty() {
-            println!("No bookmarks found.");
-        } else {
-            print!("{}", format_tweets(&result.items, show_emoji));
-            println!();
-            println!(
-                "{}",
-                format_pagination_summary(
-                    result.items.len(),
-                    result.total_fetched,
-                    result.has_more,
-                    result.next_cursor.as_deref(),
-                    show_emoji
-                )
-            );
-        }
+        print!("{}", format_tweets(&result.items, show_emoji));
+        println!();
+        println!(
+            "{}",
+            format_pagination_summary(
+                result.items.len(),
+                result.total_fetched,
+                result.has_more,
+                result.next_cursor.as_deref(),
+                show_emoji
+            )
+        );
     }
 
     Ok(())

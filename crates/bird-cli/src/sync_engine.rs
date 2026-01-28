@@ -5,7 +5,8 @@
 //! - **Backfill sync**: Continue fetching older items (resume from backfill_cursor)
 
 use bird_client::{Collection, PaginatedResult, PaginationOptions, RateLimitConfig, TwitterClient};
-use bird_storage::{SurrealDbStorage, SyncStateStore, TweetStore};
+use bird_storage::Storage;
+use std::sync::Arc;
 
 /// Result of a sync operation.
 pub struct SyncResult {
@@ -68,12 +69,12 @@ impl Default for SyncOptions {
 /// Engine for syncing tweets to storage.
 pub struct SyncEngine {
     client: TwitterClient,
-    storage: SurrealDbStorage,
+    storage: Arc<dyn Storage>,
 }
 
 impl SyncEngine {
     /// Create a new sync engine.
-    pub fn new(client: TwitterClient, storage: SurrealDbStorage) -> Self {
+    pub fn new(client: TwitterClient, storage: Arc<dyn Storage>) -> Self {
         Self { client, storage }
     }
 
@@ -120,9 +121,7 @@ impl SyncEngine {
         };
 
         match direction {
-            SyncDirection::Full => {
-                self.do_full_sync(collection, user_id, options).await
-            }
+            SyncDirection::Full => self.do_full_sync(collection, user_id, options).await,
             SyncDirection::Forward => {
                 self.do_forward_sync(collection, user_id, options, sync_state.unwrap())
                     .await
@@ -378,22 +377,23 @@ impl SyncEngine {
         match collection {
             Collection::Likes => self
                 .client
-                .get_all_likes_with_rate_limit(user_id, pagination.max_pages, &options.rate_limit)
+                .get_likes_paginated_with_rate_limit(user_id, pagination, &options.rate_limit)
                 .await
                 .map_err(|e| anyhow::anyhow!("{}", e)),
             Collection::Bookmarks => self
                 .client
-                .get_all_bookmarks_with_rate_limit(pagination.max_pages, &options.rate_limit)
+                .get_bookmarks_paginated_with_rate_limit(pagination, &options.rate_limit)
                 .await
                 .map_err(|e| anyhow::anyhow!("{}", e)),
             Collection::UserTweets => self
                 .client
-                .get_all_user_tweets_with_rate_limit(user_id, pagination.max_pages, &options.rate_limit)
+                .get_user_tweets_paginated_with_rate_limit(user_id, pagination, &options.rate_limit)
                 .await
                 .map_err(|e| anyhow::anyhow!("{}", e)),
-            Collection::Timeline => {
-                Err(anyhow::anyhow!("{} sync not yet implemented", collection.as_str()))
-            }
+            Collection::Timeline => Err(anyhow::anyhow!(
+                "{} sync not yet implemented",
+                collection.as_str()
+            )),
         }
     }
 }

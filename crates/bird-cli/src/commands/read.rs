@@ -2,7 +2,6 @@
 
 use crate::cli::{extract_tweet_id, Cli};
 use crate::output::{format_json, format_tweet};
-use bird_storage::TweetStore;
 
 /// Run the read command.
 pub async fn run(

@@ -5,7 +5,7 @@ Twitter/X GraphQL API client with pagination and rate limiting.
 ## Features
 
 - Read tweets by ID
-- Fetch likes, bookmarks, timeline
+- Fetch likes, bookmarks, user tweets, timeline
 - Cursor-based pagination
 - Rate limiting with exponential backoff
 - Cookie-based authentication

@@ -7,12 +7,17 @@ Shared types, traits, and errors for the bird workspace.
 ### Tweet Data
 
 ```rust
-use bird_core::{TweetData, TweetAuthor, TweetMedia};
+use bird_core::{TweetData, TweetAuthor, TweetMedia, MentionedUser};
 
 let tweet = TweetData {
     id: "123".to_string(),
-    text: "Hello world".to_string(),
+    text: "Hello @friend".to_string(),
     author: TweetAuthor { username: "user".to_string(), name: "User".to_string() },
+    mentions: vec![MentionedUser {
+        id: "456".to_string(),
+        username: "friend".to_string(),
+        name: Some("Friend".to_string()),
+    }],
     // ...
 };
 ```
@@ -61,6 +66,19 @@ pub trait SyncStateStore: Send + Sync {
     async fn get_sync_state(&self, collection: &str, user_id: &str) -> Result<Option<SyncState>>;
     async fn update_sync_state(&self, state: &SyncState) -> Result<()>;
     async fn clear_sync_state(&self, collection: &str, user_id: &str) -> Result<()>;
+    // ...
+}
+```
+
+### UserStore
+
+```rust
+#[async_trait]
+pub trait UserStore: Send + Sync {
+    async fn upsert_user_from_mention(&self, user: &MentionedUser) -> Result<()>;
+    async fn get_user_by_username(&self, username: &str) -> Result<Option<MentionedUser>>;
+    async fn get_tweets_mentioning_user(&self, user_id: &str, limit: Option<u32>) -> Result<Vec<TweetData>>;
+    async fn get_tweets_replying_to_user(&self, user_id: &str, limit: Option<u32>) -> Result<Vec<TweetData>>;
     // ...
 }
 ```

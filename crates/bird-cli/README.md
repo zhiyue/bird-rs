@@ -35,7 +35,9 @@ bird bookmarks --json          # JSON output
 ### Syncing to Database
 
 ```bash
-bird sync likes                # Incremental sync
+bird sync likes                # Sync liked tweets
+bird sync bookmarks            # Sync bookmarked tweets
+bird sync posts                # Sync your own tweets
 bird sync likes --full         # Full re-sync
 bird sync likes --delay 2000   # 2s between requests
 bird sync backfill likes       # Continue fetching older

@@ -35,6 +35,12 @@ let tweets = storage.get_tweets_by_collection("likes", "user_id", None, None).aw
 // Sync state
 let state = storage.get_sync_state("likes", "user_id").await?;
 storage.update_sync_state(&state).await?;
+
+// Query by mentioned user
+let user = storage.get_user_by_username("elonmusk").await?;
+if let Some(u) = user {
+    let tweets = storage.get_tweets_mentioning_user(&u.id, Some(10)).await?;
+}
 ```
 
 ## Database Location
@@ -60,7 +66,7 @@ let storage = MemoryStorage::new();
 
 ## Dependencies
 
-- [bird-core] — Storage traits (`TweetStore`, `SyncStateStore`)
+- [bird-core] — Storage traits (`TweetStore`, `SyncStateStore`, `UserStore`)
 
 [bird-core]: ../bird-core
 [SurrealDB]: https://surrealdb.com

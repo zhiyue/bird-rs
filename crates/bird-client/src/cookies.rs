@@ -84,8 +84,7 @@ pub fn resolve_credentials(
 fn extract_from_safari() -> Result<TwitterCookies> {
     use sweet_cookie::{get_cookies, GetCookiesOptions};
 
-    let options =
-        GetCookiesOptions::new("https://x.com").with_names(["auth_token", "ct0", "twid"]);
+    let options = GetCookiesOptions::new("https://x.com").with_names(["auth_token", "ct0", "twid"]);
 
     let result =
         get_cookies(&options).map_err(|e| Error::CookieExtraction(format!("Safari: {}", e)))?;

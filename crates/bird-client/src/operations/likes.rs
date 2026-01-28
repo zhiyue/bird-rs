@@ -43,7 +43,12 @@ impl TwitterClient {
 
         let headers = self.get_headers();
 
-        let response = self.http_client.get(&url).headers(headers).send().await
+        let response = self
+            .http_client
+            .get(&url)
+            .headers(headers)
+            .send()
+            .await
             .map_err(|e| Error::HttpRequest(e.to_string()))?;
 
         if response.status() == 429 {
@@ -54,7 +59,9 @@ impl TwitterClient {
             return Err(Error::ApiError(format!("HTTP {}", response.status())));
         }
 
-        let json: serde_json::Value = response.json().await
+        let json: serde_json::Value = response
+            .json()
+            .await
             .map_err(|e| Error::JsonParse(e.to_string()))?;
 
         // Check for API errors

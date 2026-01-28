@@ -49,7 +49,12 @@ impl TwitterClient {
         for query_id in query_ids {
             let url = format!("{}/{}/UserTweets?{}", TWITTER_API_BASE, query_id, params);
 
-            let response = self.http_client.get(&url).headers(headers.clone()).send().await
+            let response = self
+                .http_client
+                .get(&url)
+                .headers(headers.clone())
+                .send()
+                .await
                 .map_err(|e| Error::HttpRequest(e.to_string()))?;
 
             if response.status() == 429 {
@@ -66,7 +71,9 @@ impl TwitterClient {
                 continue;
             }
 
-            let json: serde_json::Value = response.json().await
+            let json: serde_json::Value = response
+                .json()
+                .await
                 .map_err(|e| Error::JsonParse(e.to_string()))?;
 
             // Check for API errors
@@ -106,6 +113,8 @@ impl TwitterClient {
             return Ok(PaginatedResult::new(tweets, next_cursor));
         }
 
-        Err(Error::ApiError(last_error.unwrap_or_else(|| "All query IDs failed".to_string())))
+        Err(Error::ApiError(
+            last_error.unwrap_or_else(|| "All query IDs failed".to_string()),
+        ))
     }
 }

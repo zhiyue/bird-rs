@@ -38,9 +38,9 @@ pub mod cookies;
 mod operations;
 
 pub use bird_core::{
-    Collection, CurrentUser, CurrentUserResult, Error, FollowingResult, GetTweetResult,
-    MediaType, PaginatedResult, PaginationOptions, Result, SearchResult, SyncState,
-    TweetArticle, TweetAuthor, TweetData, TweetMedia, TwitterList, TwitterUser,
+    Collection, CurrentUser, CurrentUserResult, Error, FollowingResult, GetTweetResult, MediaType,
+    PaginatedResult, PaginationOptions, Result, SearchResult, SyncState, TweetArticle, TweetAuthor,
+    TweetData, TweetMedia, TwitterList, TwitterUser,
 };
 pub use client::{RateLimitConfig, TwitterClient};
 pub use cookies::TwitterCookies;

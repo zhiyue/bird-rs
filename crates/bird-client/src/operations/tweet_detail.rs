@@ -2,7 +2,9 @@
 
 use crate::client::TwitterClient;
 use crate::constants::Operation;
-use bird_core::{Error, MediaType, MentionedUser, Result, TweetArticle, TweetAuthor, TweetData, TweetMedia};
+use bird_core::{
+    Error, MediaType, MentionedUser, Result, TweetArticle, TweetAuthor, TweetData, TweetMedia,
+};
 use serde_json::{json, Value};
 
 impl TwitterClient {
@@ -22,7 +24,12 @@ impl TwitterClient {
         let url = self.build_graphql_url_with_field_toggles(Operation::TweetDetail, &variables);
         let headers = self.get_headers();
 
-        let response = self.http_client.get(&url).headers(headers).send().await
+        let response = self
+            .http_client
+            .get(&url)
+            .headers(headers)
+            .send()
+            .await
             .map_err(|e| Error::HttpRequest(e.to_string()))?;
 
         if response.status() == 404 {
@@ -37,7 +44,9 @@ impl TwitterClient {
             return Err(Error::ApiError(format!("HTTP {}", response.status())));
         }
 
-        let json: Value = response.json().await
+        let json: Value = response
+            .json()
+            .await
             .map_err(|e| Error::JsonParse(e.to_string()))?;
 
         // Check for API errors
@@ -72,10 +81,7 @@ fn parse_tweet_from_response(json: &Value, tweet_id: &str, quote_depth: u32) -> 
         for instruction in instructions {
             if let Some(entries) = instruction.get("entries").and_then(|e| e.as_array()) {
                 for entry in entries {
-                    let entry_id = entry
-                        .get("entryId")
-                        .and_then(|e| e.as_str())
-                        .unwrap_or("");
+                    let entry_id = entry.get("entryId").and_then(|e| e.as_str()).unwrap_or("");
 
                     // Look for the focal tweet entry
                     if entry_id.starts_with("tweet-") || entry_id.contains(tweet_id) {
@@ -376,10 +382,7 @@ pub(crate) fn parse_timeline_entries(
     let mut next_cursor = None;
 
     for entry in entries {
-        let entry_type = entry
-            .get("entryId")
-            .and_then(|e| e.as_str())
-            .unwrap_or("");
+        let entry_type = entry.get("entryId").and_then(|e| e.as_str()).unwrap_or("");
 
         // Handle cursor entries
         if entry_type.starts_with("cursor-bottom") {
@@ -422,7 +425,10 @@ fn parse_mentions(legacy: Option<&Value>) -> Vec<MentionedUser> {
                 .filter_map(|m| {
                     let id = m.get("id_str").and_then(|v| v.as_str())?.to_string();
                     let username = m.get("screen_name").and_then(|v| v.as_str())?.to_string();
-                    let name = m.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let name = m
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     Some(MentionedUser { id, username, name })
                 })
                 .collect()

@@ -329,6 +329,15 @@ impl TwitterClient {
         self.fetch_timeline(options).await
     }
 
+    /// Get user's own tweets with pagination.
+    pub async fn get_user_tweets(
+        &self,
+        user_id: &str,
+        options: &PaginationOptions,
+    ) -> Result<PaginatedResult<TweetData>> {
+        self.fetch_user_tweets(user_id, options).await
+    }
+
     /// Fetch all pages of likes (convenience method).
     pub async fn get_all_likes(
         &self,
@@ -396,6 +405,44 @@ impl TwitterClient {
                     PaginationOptions::new()
                 };
                 self.fetch_bookmarks(&opts).await
+            },
+            &options,
+            rate_limit,
+        )
+        .await
+    }
+
+    /// Fetch all pages of user's own tweets (convenience method).
+    pub async fn get_all_user_tweets(
+        &self,
+        user_id: &str,
+        max_pages: Option<u32>,
+    ) -> Result<PaginatedResult<TweetData>> {
+        self.get_all_user_tweets_with_rate_limit(user_id, max_pages, &RateLimitConfig::default())
+            .await
+    }
+
+    /// Fetch all pages of user's own tweets with custom rate limit config.
+    pub async fn get_all_user_tweets_with_rate_limit(
+        &self,
+        user_id: &str,
+        max_pages: Option<u32>,
+        rate_limit: &RateLimitConfig,
+    ) -> Result<PaginatedResult<TweetData>> {
+        let mut options = PaginationOptions::new();
+        if let Some(max) = max_pages {
+            options = options.with_max_pages(max);
+        } else {
+            options = options.fetch_all();
+        }
+        self.fetch_all_pages_with_rate_limit(
+            |cursor| async {
+                let opts = if let Some(c) = cursor {
+                    PaginationOptions::new().with_cursor(c)
+                } else {
+                    PaginationOptions::new()
+                };
+                self.fetch_user_tweets(user_id, &opts).await
             },
             &options,
             rate_limit,

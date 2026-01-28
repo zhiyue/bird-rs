@@ -386,7 +386,12 @@ impl SyncEngine {
                 .get_all_bookmarks_with_rate_limit(pagination.max_pages, &options.rate_limit)
                 .await
                 .map_err(|e| anyhow::anyhow!("{}", e)),
-            Collection::Timeline | Collection::UserTweets => {
+            Collection::UserTweets => self
+                .client
+                .get_all_user_tweets_with_rate_limit(user_id, pagination.max_pages, &options.rate_limit)
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e)),
+            Collection::Timeline => {
                 Err(anyhow::anyhow!("{} sync not yet implemented", collection.as_str()))
             }
         }

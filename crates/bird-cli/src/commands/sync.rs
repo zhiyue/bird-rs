@@ -50,6 +50,27 @@ pub async fn run_sync_bookmarks(
     .await
 }
 
+/// Run the sync posts command.
+pub async fn run_sync_posts(
+    cli: &Cli,
+    full: bool,
+    max_pages: Option<u32>,
+    delay_ms: Option<u64>,
+    no_backfill: bool,
+    show_emoji: bool,
+) -> anyhow::Result<()> {
+    run_sync(
+        cli,
+        Collection::UserTweets,
+        full,
+        max_pages,
+        delay_ms,
+        no_backfill,
+        show_emoji,
+    )
+    .await
+}
+
 /// Run the sync backfill command.
 pub async fn run_backfill(
     cli: &Cli,
@@ -246,6 +267,7 @@ pub async fn run_status(cli: &Cli, show_emoji: bool) -> anyhow::Result<()> {
                 "likes" => "❤️  ",
                 "bookmarks" => "🔖 ",
                 "timeline" => "🏠 ",
+                "user_tweets" => "📝 ",
                 _ => "📁 ",
             }
         } else {

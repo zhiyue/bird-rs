@@ -2,7 +2,7 @@
 
 use crate::error::Result;
 use crate::pagination::SyncState;
-use crate::types::TweetData;
+use crate::types::{MentionedUser, TweetData};
 use async_trait::async_trait;
 
 /// Trait for storing and retrieving tweets.
@@ -68,9 +68,36 @@ pub trait SyncStateStore: Send + Sync {
     async fn get_all_sync_states(&self, user_id: &str) -> Result<Vec<SyncState>>;
 }
 
+/// Trait for storing and retrieving Twitter users.
+#[async_trait]
+pub trait UserStore: Send + Sync {
+    /// Insert or update a user from mention data.
+    async fn upsert_user_from_mention(&self, user: &MentionedUser) -> Result<()>;
+
+    /// Get a user by username (case-insensitive).
+    async fn get_user_by_username(&self, username: &str) -> Result<Option<MentionedUser>>;
+
+    /// Get a user by ID.
+    async fn get_user_by_id(&self, id: &str) -> Result<Option<MentionedUser>>;
+
+    /// Get tweets that mention a specific user.
+    async fn get_tweets_mentioning_user(
+        &self,
+        user_id: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<TweetData>>;
+
+    /// Get tweets that are replies to a specific user.
+    async fn get_tweets_replying_to_user(
+        &self,
+        user_id: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<TweetData>>;
+}
+
 /// Combined storage trait for convenience.
 #[async_trait]
-pub trait Storage: TweetStore + SyncStateStore {}
+pub trait Storage: TweetStore + SyncStateStore + UserStore {}
 
-/// Blanket implementation for types that implement both traits.
-impl<T: TweetStore + SyncStateStore> Storage for T {}
+/// Blanket implementation for types that implement all traits.
+impl<T: TweetStore + SyncStateStore + UserStore> Storage for T {}

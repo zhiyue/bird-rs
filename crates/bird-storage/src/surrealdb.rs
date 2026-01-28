@@ -1,7 +1,7 @@
 //! SurrealDB storage implementation.
 
 use async_trait::async_trait;
-use bird_core::{Error, Result, SyncState, SyncStateStore, TweetAuthor, TweetData, TweetStore};
+use bird_core::{Error, MentionedUser, Result, SyncState, SyncStateStore, TweetAuthor, TweetData, TweetStore, UserStore};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -27,11 +27,21 @@ struct TweetRecordContent {
     like_count: Option<u64>,
     conversation_id: Option<String>,
     in_reply_to_status_id: Option<String>,
+    in_reply_to_user_id: Option<String>,
+    mentions: Vec<MentionedUserRecord>,
     media: Option<serde_json::Value>,
     article: Option<serde_json::Value>,
     quoted_tweet: Option<serde_json::Value>,
     fetched_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
+}
+
+/// Mentioned user record for storage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct MentionedUserRecord {
+    id: String,
+    username: String,
+    name: Option<String>,
 }
 
 /// Tweet record for SurrealDB storage (for reading - includes the tweet_id field).
@@ -48,6 +58,10 @@ struct TweetRecord {
     like_count: Option<u64>,
     conversation_id: Option<String>,
     in_reply_to_status_id: Option<String>,
+    #[serde(default)]
+    in_reply_to_user_id: Option<String>,
+    #[serde(default)]
+    mentions: Vec<MentionedUserRecord>,
     media: Option<serde_json::Value>,
     article: Option<serde_json::Value>,
     quoted_tweet: Option<serde_json::Value>,
@@ -72,6 +86,12 @@ impl From<&TweetData> for TweetRecordContent {
             like_count: tweet.like_count,
             conversation_id: tweet.conversation_id.clone(),
             in_reply_to_status_id: tweet.in_reply_to_status_id.clone(),
+            in_reply_to_user_id: tweet.in_reply_to_user_id.clone(),
+            mentions: tweet.mentions.iter().map(|m| MentionedUserRecord {
+                id: m.id.clone(),
+                username: m.username.clone(),
+                name: m.name.clone(),
+            }).collect(),
             media: tweet.media.as_ref().and_then(|m| serde_json::to_value(m).ok()),
             article: tweet.article.as_ref().and_then(|a| serde_json::to_value(a).ok()),
             quoted_tweet: tweet.quoted_tweet.as_ref().and_then(|q| serde_json::to_value(q.as_ref()).ok()),
@@ -99,6 +119,12 @@ impl TryFrom<TweetRecord> for TweetData {
             like_count: record.like_count,
             conversation_id: record.conversation_id,
             in_reply_to_status_id: record.in_reply_to_status_id,
+            in_reply_to_user_id: record.in_reply_to_user_id,
+            mentions: record.mentions.into_iter().map(|m| MentionedUser {
+                id: m.id,
+                username: m.username,
+                name: m.name,
+            }).collect(),
             quoted_tweet: record.quoted_tweet
                 .map(|v| serde_json::from_value(v))
                 .transpose()
@@ -221,6 +247,17 @@ impl SurrealDbStorage {
             .query("DEFINE INDEX IF NOT EXISTS sync_state_pk ON sync_state FIELDS collection, user_id UNIQUE")
             .await
             .map_err(|e| Error::Storage(format!("Failed to create sync_state index: {}", e)))?;
+
+        // Twitter users table for storing mentioned users
+        self.db
+            .query("DEFINE TABLE IF NOT EXISTS twitter_user SCHEMALESS")
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to create twitter_user table: {}", e)))?;
+
+        self.db
+            .query("DEFINE INDEX IF NOT EXISTS twitter_user_username ON twitter_user FIELDS username_lower UNIQUE")
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to create twitter_user username index: {}", e)))?;
 
         Ok(())
     }
@@ -562,5 +599,126 @@ impl SyncStateStore for SurrealDbStorage {
             .map_err(|e| Error::Storage(format!("Failed to parse sync states: {}", e)))?;
 
         Ok(records.into_iter().map(|r| r.into()).collect())
+    }
+}
+
+/// Twitter user record for storage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TwitterUserRecord {
+    user_id: String,
+    username: String,
+    username_lower: String,
+    name: Option<String>,
+    updated_at: DateTime<Utc>,
+}
+
+#[async_trait]
+impl UserStore for SurrealDbStorage {
+    async fn upsert_user_from_mention(&self, user: &MentionedUser) -> Result<()> {
+        let record = TwitterUserRecord {
+            user_id: user.id.clone(),
+            username: user.username.clone(),
+            username_lower: user.username.to_lowercase(),
+            name: user.name.clone(),
+            updated_at: Utc::now(),
+        };
+
+        let json_content = serde_json::to_value(&record)
+            .map_err(|e| Error::Storage(format!("Failed to serialize user: {}", e)))?;
+
+        // Use user_id as the record ID
+        let query = format!("UPSERT twitter_user:⟨{}⟩ CONTENT $content", user.id);
+        self.db
+            .query(&query)
+            .bind(("content", json_content))
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to upsert user: {}", e)))?;
+
+        Ok(())
+    }
+
+    async fn get_user_by_username(&self, username: &str) -> Result<Option<MentionedUser>> {
+        let username_lower = username.to_lowercase();
+
+        let mut result = self.db
+            .query("SELECT * FROM twitter_user WHERE username_lower = $username LIMIT 1")
+            .bind(("username", username_lower))
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get user: {}", e)))?;
+
+        let records: Vec<TwitterUserRecord> = result.take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse user: {}", e)))?;
+
+        Ok(records.into_iter().next().map(|r| MentionedUser {
+            id: r.user_id,
+            username: r.username,
+            name: r.name,
+        }))
+    }
+
+    async fn get_user_by_id(&self, id: &str) -> Result<Option<MentionedUser>> {
+        let query = format!("SELECT * FROM twitter_user:⟨{}⟩", id);
+        let mut result = self.db
+            .query(&query)
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get user: {}", e)))?;
+
+        let records: Vec<TwitterUserRecord> = result.take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse user: {}", e)))?;
+
+        Ok(records.into_iter().next().map(|r| MentionedUser {
+            id: r.user_id,
+            username: r.username,
+            name: r.name,
+        }))
+    }
+
+    async fn get_tweets_mentioning_user(
+        &self,
+        user_id: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<TweetData>> {
+        let limit = limit.unwrap_or(20);
+        let user_id_owned = user_id.to_string();
+
+        // Query tweets where mentions array contains a user with this ID
+        let mut result = self.db
+            .query(
+                "SELECT * FROM tweet WHERE mentions[*].id CONTAINS $user_id
+                 ORDER BY created_at DESC LIMIT $limit"
+            )
+            .bind(("user_id", user_id_owned))
+            .bind(("limit", limit))
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get tweets: {}", e)))?;
+
+        let records: Vec<TweetRecord> = result.take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse tweets: {}", e)))?;
+
+        records.into_iter().map(|r| r.try_into()).collect()
+    }
+
+    async fn get_tweets_replying_to_user(
+        &self,
+        user_id: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<TweetData>> {
+        let limit = limit.unwrap_or(20);
+        let user_id_owned = user_id.to_string();
+
+        let mut result = self.db
+            .query(
+                "SELECT * FROM tweet WHERE in_reply_to_user_id = $user_id
+                 ORDER BY created_at DESC LIMIT $limit"
+            )
+            .bind(("user_id", user_id_owned))
+            .bind(("limit", limit))
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get tweets: {}", e)))?;
+
+        let records: Vec<TweetRecord> = result.take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse tweets: {}", e)))?;
+
+        records.into_iter().map(|r| r.try_into()).collect()
     }
 }

@@ -2,7 +2,7 @@
 
 use crate::client::TwitterClient;
 use crate::constants::Operation;
-use bird_core::{Error, MediaType, Result, TweetArticle, TweetAuthor, TweetData, TweetMedia};
+use bird_core::{Error, MediaType, MentionedUser, Result, TweetArticle, TweetAuthor, TweetData, TweetMedia};
 use serde_json::{json, Value};
 
 impl TwitterClient {
@@ -189,6 +189,15 @@ pub(crate) fn parse_tweet_result(
         None
     };
 
+    // Parse in_reply_to_user_id from legacy data
+    let in_reply_to_user_id = legacy
+        .and_then(|l| l.get("in_reply_to_user_id_str"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    // Parse mentions from entities
+    let mentions = parse_mentions(legacy);
+
     Ok(TweetData {
         id,
         text,
@@ -200,6 +209,8 @@ pub(crate) fn parse_tweet_result(
         like_count,
         conversation_id,
         in_reply_to_status_id,
+        in_reply_to_user_id,
+        mentions,
         quoted_tweet,
         media,
         article,
@@ -398,4 +409,23 @@ pub(crate) fn parse_timeline_entries(
     }
 
     (tweets, next_cursor)
+}
+
+/// Parse mentioned users from tweet legacy entities.
+fn parse_mentions(legacy: Option<&Value>) -> Vec<MentionedUser> {
+    legacy
+        .and_then(|l| l.pointer("/entities/user_mentions"))
+        .and_then(|m| m.as_array())
+        .map(|mentions| {
+            mentions
+                .iter()
+                .filter_map(|m| {
+                    let id = m.get("id_str").and_then(|v| v.as_str())?.to_string();
+                    let username = m.get("screen_name").and_then(|v| v.as_str())?.to_string();
+                    let name = m.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    Some(MentionedUser { id, username, name })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }

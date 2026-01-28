@@ -176,6 +176,25 @@ enum SyncAction {
         no_backfill: bool,
     },
 
+    /// Sync your own tweets/posts to database.
+    Posts {
+        /// Full re-sync (ignore previous sync state).
+        #[arg(long)]
+        full: bool,
+
+        /// Maximum number of pages to fetch (default: 10).
+        #[arg(long)]
+        max_pages: Option<u32>,
+
+        /// Delay between page requests in milliseconds (default: 1000).
+        #[arg(long)]
+        delay: Option<u64>,
+
+        /// Skip backfill, only fetch new items.
+        #[arg(long)]
+        no_backfill: bool,
+    },
+
     /// Continue backfilling older tweets.
     Backfill {
         /// Collection to backfill (likes, bookmarks).
@@ -245,6 +264,22 @@ impl Cli {
                     no_backfill,
                 } => {
                     sync::run_sync_bookmarks(
+                        &self,
+                        *full,
+                        *max_pages,
+                        *delay,
+                        *no_backfill,
+                        show_emoji,
+                    )
+                    .await
+                }
+                SyncAction::Posts {
+                    full,
+                    max_pages,
+                    delay,
+                    no_backfill,
+                } => {
+                    sync::run_sync_posts(
                         &self,
                         *full,
                         *max_pages,

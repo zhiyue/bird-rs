@@ -55,6 +55,18 @@ pub struct TweetArticle {
     pub preview_text: Option<String>,
 }
 
+/// A mentioned user in a tweet.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MentionedUser {
+    /// User ID.
+    pub id: String,
+    /// Username (handle without @).
+    pub username: String,
+    /// Display name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
 /// Parsed tweet data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TweetData {
@@ -85,6 +97,12 @@ pub struct TweetData {
     /// ID of tweet being replied to.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub in_reply_to_status_id: Option<String>,
+    /// User ID of the user being replied to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_reply_to_user_id: Option<String>,
+    /// Users mentioned in this tweet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mentions: Vec<MentionedUser>,
     /// Quoted tweet (nested, depth controlled by quote_depth).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quoted_tweet: Option<Box<TweetData>>,
@@ -259,7 +277,7 @@ impl std::str::FromStr for Collection {
             "likes" => Ok(Collection::Likes),
             "bookmarks" => Ok(Collection::Bookmarks),
             "timeline" => Ok(Collection::Timeline),
-            "user_tweets" => Ok(Collection::UserTweets),
+            "user_tweets" | "posts" => Ok(Collection::UserTweets),
             _ => Err(format!("Unknown collection: {}", s)),
         }
     }

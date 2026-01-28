@@ -40,6 +40,7 @@ bird sync likes
 | `bird sync bookmarks` | Sync bookmarks to local DB    |
 | `bird sync posts`     | Sync your own tweets to DB    |
 | `bird sync status`    | Show sync progress            |
+| `bird db backfill-created-at` | Backfill created_at_ts for stored tweets |
 
 ## Sync
 
@@ -95,6 +96,14 @@ For testing, you can use in-memory storage:
 
 ```bash
 bird --storage memory sync likes
+```
+
+## Migrations
+
+If you upgraded from a version without `created_at_ts`, run:
+
+```bash
+bird db backfill-created-at
 ```
 
 ## Authentication

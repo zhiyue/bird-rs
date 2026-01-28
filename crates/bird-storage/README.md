@@ -68,6 +68,16 @@ Override via:
 - `--db-path` CLI flag
 - `--db-url` CLI flag
 
+## Maintenance
+
+If you introduced the `created_at_ts` field in an existing database, you can
+backfill via:
+
+```rust
+let result = storage.backfill_created_at_ts(200).await?;
+println!("Updated {}, skipped {}", result.updated, result.skipped);
+```
+
 ## Testing
 
 Use `MemoryStorage` for tests:

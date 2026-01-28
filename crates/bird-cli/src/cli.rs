@@ -1,6 +1,6 @@
 //! CLI interface for bird.
 
-use crate::commands::{bookmarks, likes, list, read, sync, whoami};
+use crate::commands::{bookmarks, db, likes, list, read, sync, whoami};
 use bird_client::cookies::{check_available_sources, resolve_credentials};
 use bird_client::{Collection, TwitterClient, TwitterClientOptions};
 use bird_storage::{
@@ -23,6 +23,7 @@ use std::sync::Arc;
   bird likes --all               Fetch all pages of likes
   bird bookmarks --max-pages 5   Fetch up to 5 pages of bookmarks
   bird sync likes                Sync likes to local database
+  bird db backfill-created-at    Backfill created_at_ts for existing tweets
   bird sync status               Show sync state")]
 pub struct Cli {
     #[command(subcommand)]
@@ -180,6 +181,12 @@ enum Commands {
         #[command(subcommand)]
         action: SyncAction,
     },
+
+    /// Database utilities.
+    Db {
+        #[command(subcommand)]
+        action: DbAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -265,6 +272,16 @@ enum SyncAction {
     },
 }
 
+#[derive(Subcommand)]
+enum DbAction {
+    /// Backfill created_at_ts for existing tweets.
+    BackfillCreatedAt {
+        /// Batch size per query (default: 200).
+        #[arg(long)]
+        batch_size: Option<u32>,
+    },
+}
+
 impl Cli {
     /// Run the CLI.
     pub async fn run(self) -> anyhow::Result<()> {
@@ -340,6 +357,11 @@ impl Cli {
                 SyncAction::Status => sync::run_status(&self, show_emoji).await,
                 SyncAction::Reset { collection } => sync::run_reset(&self, collection).await,
             },
+            Some(Commands::Db { action }) => match action {
+                DbAction::BackfillCreatedAt { batch_size } => {
+                    db::run_backfill_created_at(&self, *batch_size, show_emoji).await
+                }
+            },
             None => {
                 // Check for shorthand tweet ID
                 if let Some(tweet_id) = &self.tweet_id {
@@ -385,6 +407,49 @@ impl Cli {
             timeout_ms: Some(self.timeout),
             quote_depth: Some(self.quote_depth),
         }))
+    }
+
+    pub(crate) fn surrealdb_config(&self) -> anyhow::Result<SurrealDbConfig> {
+        let endpoint = self
+            .db_url
+            .clone()
+            .unwrap_or_else(|| format!("rocksdb://{}", self.db_path().display()));
+        let mut cfg = SurrealDbConfig {
+            endpoint,
+            namespace: self.db_namespace.clone(),
+            database: self.db_name.clone(),
+            auth: None,
+        };
+
+        if self.db_user.is_some() || self.db_pass.is_some() {
+            let username = self.db_user.as_deref().ok_or_else(|| {
+                anyhow::anyhow!("--db-user is required when --db-pass is set")
+            })?;
+            let password = self.db_pass.as_deref().ok_or_else(|| {
+                anyhow::anyhow!("--db-pass is required when --db-user is set")
+            })?;
+
+            cfg.auth = Some(match self.db_auth {
+                DbAuthMode::Root => SurrealDbAuth::Root {
+                    username: username.to_string(),
+                    password: password.to_string(),
+                },
+                DbAuthMode::Namespace => SurrealDbAuth::Namespace {
+                    username: username.to_string(),
+                    password: password.to_string(),
+                },
+                DbAuthMode::Database => SurrealDbAuth::Database {
+                    username: username.to_string(),
+                    password: password.to_string(),
+                },
+            });
+        }
+
+        Ok(cfg)
+    }
+
+    pub(crate) fn uses_surrealdb(&self) -> bool {
+        matches!(self.storage, StorageBackend::Surrealdb)
     }
 
     /// Get the database path.

@@ -17,6 +17,15 @@ pub struct SurrealDbStorage {
     db: Surreal<Any>,
 }
 
+/// Result of backfilling created_at_ts.
+#[derive(Debug, Clone, Copy)]
+pub struct BackfillCreatedAtResult {
+    /// Number of tweets updated with parsed timestamps.
+    pub updated: usize,
+    /// Number of tweets set to a fallback timestamp (unparseable or missing).
+    pub skipped: usize,
+}
+
 /// Authentication configuration for remote SurrealDB connections.
 #[derive(Debug, Clone)]
 pub enum SurrealDbAuth {
@@ -328,6 +337,69 @@ impl SurrealDbStorage {
         let storage = Self { db };
         storage.init_schema().await?;
         Ok(storage)
+    }
+
+    /// Backfill created_at_ts for tweets missing the timestamp.
+    pub async fn backfill_created_at_ts(&self, batch_size: u32) -> Result<BackfillCreatedAtResult> {
+        if batch_size == 0 {
+            return Err(Error::Storage(
+                "Batch size must be greater than 0".to_string(),
+            ));
+        }
+
+        #[derive(Deserialize)]
+        struct CreatedAtRecord {
+            tweet_id: String,
+            created_at: Option<String>,
+        }
+
+        let mut updated = 0usize;
+        let mut skipped = 0usize;
+
+        loop {
+            let mut result = self
+                .db
+                .query(
+                    "SELECT tweet_id, created_at FROM tweet WHERE created_at_ts IS NONE LIMIT $limit",
+                )
+                .bind(("limit", batch_size))
+                .await
+                .map_err(|e| Error::Storage(format!("Failed to fetch tweets: {e}")))?;
+
+            let records: Vec<CreatedAtRecord> = result
+                .take(0)
+                .map_err(|e| Error::Storage(format!("Failed to parse tweets: {e}")))?;
+
+            if records.is_empty() {
+                break;
+            }
+
+            for record in records {
+                let parsed = record
+                    .created_at
+                    .as_deref()
+                    .and_then(parse_twitter_timestamp);
+                let created_at_ts = parsed.unwrap_or(0);
+
+                if parsed.is_some() {
+                    updated += 1;
+                } else {
+                    skipped += 1;
+                }
+
+                let query = format!(
+                    "UPDATE tweet:⟨{}⟩ SET created_at_ts = $created_at_ts",
+                    record.tweet_id
+                );
+                self.db
+                    .query(&query)
+                    .bind(("created_at_ts", created_at_ts))
+                    .await
+                    .map_err(|e| Error::Storage(format!("Failed to update tweet: {e}")))?;
+            }
+        }
+
+        Ok(BackfillCreatedAtResult { updated, skipped })
     }
 
     /// Initialize the database schema.

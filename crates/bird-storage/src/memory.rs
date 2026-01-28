@@ -1,7 +1,9 @@
 //! In-memory storage implementation for testing.
 
 use async_trait::async_trait;
-use bird_core::{Error, Result, SyncState, SyncStateStore, TweetData, TweetStore};
+use bird_core::{
+    Error, MentionedUser, Result, SyncState, SyncStateStore, TweetData, TweetStore, UserStore,
+};
 use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 
@@ -9,7 +11,9 @@ use std::sync::RwLock;
 pub struct MemoryStorage {
     tweets: RwLock<HashMap<String, TweetData>>,
     collections: RwLock<HashMap<(String, String), HashSet<String>>>, // (collection, user_id) -> tweet_ids
-    sync_states: RwLock<HashMap<(String, String), SyncState>>,      // (collection, user_id) -> state
+    sync_states: RwLock<HashMap<(String, String), SyncState>>, // (collection, user_id) -> state
+    users: RwLock<HashMap<String, MentionedUser>>,             // user_id -> user
+    usernames: RwLock<HashMap<String, String>>,                // username_lower -> user_id
 }
 
 impl MemoryStorage {
@@ -19,6 +23,8 @@ impl MemoryStorage {
             tweets: RwLock::new(HashMap::new()),
             collections: RwLock::new(HashMap::new()),
             sync_states: RwLock::new(HashMap::new()),
+            users: RwLock::new(HashMap::new()),
+            usernames: RwLock::new(HashMap::new()),
         }
     }
 }
@@ -164,7 +170,10 @@ impl TweetStore for MemoryStorage {
             .map_err(|e| Error::Storage(e.to_string()))?;
 
         let key = (collection.to_string(), user_id.to_string());
-        Ok(collections.get(&key).map(|ids| ids.len() as u64).unwrap_or(0))
+        Ok(collections
+            .get(&key)
+            .map(|ids| ids.len() as u64)
+            .unwrap_or(0))
     }
 }
 
@@ -216,6 +225,102 @@ impl SyncStateStore for MemoryStorage {
     }
 }
 
+#[async_trait]
+impl UserStore for MemoryStorage {
+    async fn upsert_user_from_mention(&self, user: &MentionedUser) -> Result<()> {
+        let mut users = self
+            .users
+            .write()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+        let mut usernames = self
+            .usernames
+            .write()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+
+        users.insert(user.id.clone(), user.clone());
+        usernames.insert(user.username.to_lowercase(), user.id.clone());
+        Ok(())
+    }
+
+    async fn get_user_by_username(&self, username: &str) -> Result<Option<MentionedUser>> {
+        let usernames = self
+            .usernames
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+        let users = self
+            .users
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+
+        if let Some(user_id) = usernames.get(&username.to_lowercase()) {
+            Ok(users.get(user_id).cloned())
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn get_user_by_id(&self, id: &str) -> Result<Option<MentionedUser>> {
+        let users = self
+            .users
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+        Ok(users.get(id).cloned())
+    }
+
+    async fn get_tweets_mentioning_user(
+        &self,
+        user_id: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<TweetData>> {
+        let tweets = self
+            .tweets
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+        let limit = limit.unwrap_or(20) as usize;
+
+        let mut results = Vec::new();
+        for tweet in tweets.values() {
+            if tweet.mentions.iter().any(|mention| mention.id == user_id) {
+                results.push(tweet.clone());
+                if results.len() >= limit {
+                    break;
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    async fn get_tweets_replying_to_user(
+        &self,
+        user_id: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<TweetData>> {
+        let tweets = self
+            .tweets
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+        let limit = limit.unwrap_or(20) as usize;
+
+        let mut results = Vec::new();
+        for tweet in tweets.values() {
+            if tweet
+                .in_reply_to_user_id
+                .as_deref()
+                .map(|id| id == user_id)
+                .unwrap_or(false)
+            {
+                results.push(tweet.clone());
+                if results.len() >= limit {
+                    break;
+                }
+            }
+        }
+
+        Ok(results)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,6 +342,8 @@ mod tests {
             like_count: None,
             conversation_id: None,
             in_reply_to_status_id: None,
+            in_reply_to_user_id: None,
+            mentions: Vec::new(),
             quoted_tweet: None,
             media: None,
             article: None,
@@ -266,6 +373,8 @@ mod tests {
             like_count: None,
             conversation_id: None,
             in_reply_to_status_id: None,
+            in_reply_to_user_id: None,
+            mentions: Vec::new(),
             quoted_tweet: None,
             media: None,
             article: None,
@@ -289,5 +398,59 @@ mod tests {
 
         let count = storage.collection_count("likes", "user1").await.unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_user_store_queries() {
+        let storage = MemoryStorage::new();
+        let user = MentionedUser {
+            id: "u1".to_string(),
+            username: "Alice".to_string(),
+            name: Some("Alice A".to_string()),
+        };
+        storage.upsert_user_from_mention(&user).await.unwrap();
+
+        let by_username = storage
+            .get_user_by_username("alice")
+            .await
+            .unwrap()
+            .expect("user by username");
+        assert_eq!(by_username.id, "u1");
+
+        let tweet = TweetData {
+            id: "t1".to_string(),
+            text: "Hello @Alice".to_string(),
+            author: bird_core::TweetAuthor {
+                username: "bob".to_string(),
+                name: "Bob".to_string(),
+            },
+            author_id: Some("u2".to_string()),
+            created_at: None,
+            reply_count: None,
+            retweet_count: None,
+            like_count: None,
+            conversation_id: None,
+            in_reply_to_status_id: None,
+            in_reply_to_user_id: Some("u1".to_string()),
+            mentions: vec![user],
+            quoted_tweet: None,
+            media: None,
+            article: None,
+            _raw: None,
+        };
+
+        storage.upsert_tweet(&tweet).await.unwrap();
+
+        let mentions = storage
+            .get_tweets_mentioning_user("u1", Some(10))
+            .await
+            .unwrap();
+        assert_eq!(mentions.len(), 1);
+
+        let replies = storage
+            .get_tweets_replying_to_user("u1", Some(10))
+            .await
+            .unwrap();
+        assert_eq!(replies.len(), 1);
     }
 }

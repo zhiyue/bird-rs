@@ -43,7 +43,7 @@ colored = "2"
 sweet-cookie = { path = "../sweet-cookie-rs" }
 
 # Database
-surrealdb = { version = "2", features = ["kv-rocksdb"] }
+surrealdb = { version = "2", features = ["kv-rocksdb", "protocol-http"] }
 
 # Utilities
 uuid = { version = "1", features = ["v4"] }

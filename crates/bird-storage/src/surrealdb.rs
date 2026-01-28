@@ -1,16 +1,56 @@
 //! SurrealDB storage implementation.
 
 use async_trait::async_trait;
-use bird_core::{Error, MentionedUser, Result, SyncState, SyncStateStore, TweetAuthor, TweetData, TweetStore, UserStore};
+use bird_core::{
+    Error, MentionedUser, Result, SyncState, SyncStateStore, TweetAuthor, TweetData, TweetStore,
+    UserStore,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use surrealdb::engine::local::{Db, RocksDb};
+use surrealdb::engine::any::{connect, Any};
+use surrealdb::opt::auth::{Database, Namespace, Root};
 use surrealdb::Surreal;
 
 /// SurrealDB storage backend using embedded RocksDB.
 pub struct SurrealDbStorage {
-    db: Surreal<Db>,
+    db: Surreal<Any>,
+}
+
+/// Authentication configuration for remote SurrealDB connections.
+#[derive(Debug, Clone)]
+pub enum SurrealDbAuth {
+    /// Root user authentication.
+    Root { username: String, password: String },
+    /// Namespace user authentication.
+    Namespace { username: String, password: String },
+    /// Database user authentication.
+    Database { username: String, password: String },
+}
+
+/// Configuration for creating a SurrealDB storage backend.
+#[derive(Debug, Clone)]
+pub struct SurrealDbConfig {
+    /// Connection endpoint (e.g., "rocksdb://path", "ws://host:8000", "https://cloud.surrealdb.com").
+    pub endpoint: String,
+    /// Namespace to use.
+    pub namespace: String,
+    /// Database to use.
+    pub database: String,
+    /// Optional authentication.
+    pub auth: Option<SurrealDbAuth>,
+}
+
+impl SurrealDbConfig {
+    /// Create a local RocksDB-backed configuration using the default namespace/database.
+    pub fn local(path: &Path) -> Self {
+        Self {
+            endpoint: format!("rocksdb://{}", path.to_string_lossy()),
+            namespace: "bird".to_string(),
+            database: "main".to_string(),
+            auth: None,
+        }
+    }
 }
 
 /// Tweet record for SurrealDB storage (for writing - without id since SurrealDB manages it).
@@ -22,6 +62,7 @@ struct TweetRecordContent {
     author_name: String,
     text: String,
     created_at: Option<String>,
+    created_at_ts: Option<i64>,
     reply_count: Option<u64>,
     retweet_count: Option<u64>,
     like_count: Option<u64>,
@@ -53,6 +94,9 @@ struct TweetRecord {
     author_name: String,
     text: String,
     created_at: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    created_at_ts: Option<i64>,
     reply_count: Option<u64>,
     retweet_count: Option<u64>,
     like_count: Option<u64>,
@@ -81,24 +125,48 @@ impl From<&TweetData> for TweetRecordContent {
             author_name: tweet.author.name.clone(),
             text: tweet.text.clone(),
             created_at: tweet.created_at.clone(),
+            created_at_ts: tweet
+                .created_at
+                .as_deref()
+                .and_then(parse_twitter_timestamp),
             reply_count: tweet.reply_count,
             retweet_count: tweet.retweet_count,
             like_count: tweet.like_count,
             conversation_id: tweet.conversation_id.clone(),
             in_reply_to_status_id: tweet.in_reply_to_status_id.clone(),
             in_reply_to_user_id: tweet.in_reply_to_user_id.clone(),
-            mentions: tweet.mentions.iter().map(|m| MentionedUserRecord {
-                id: m.id.clone(),
-                username: m.username.clone(),
-                name: m.name.clone(),
-            }).collect(),
-            media: tweet.media.as_ref().and_then(|m| serde_json::to_value(m).ok()),
-            article: tweet.article.as_ref().and_then(|a| serde_json::to_value(a).ok()),
-            quoted_tweet: tweet.quoted_tweet.as_ref().and_then(|q| serde_json::to_value(q.as_ref()).ok()),
+            mentions: tweet
+                .mentions
+                .iter()
+                .map(|m| MentionedUserRecord {
+                    id: m.id.clone(),
+                    username: m.username.clone(),
+                    name: m.name.clone(),
+                })
+                .collect(),
+            media: tweet
+                .media
+                .as_ref()
+                .and_then(|m| serde_json::to_value(m).ok()),
+            article: tweet
+                .article
+                .as_ref()
+                .and_then(|a| serde_json::to_value(a).ok()),
+            quoted_tweet: tweet
+                .quoted_tweet
+                .as_ref()
+                .and_then(|q| serde_json::to_value(q.as_ref()).ok()),
             fetched_at: now,
             updated_at: now,
         }
     }
+}
+
+/// Parse Twitter's created_at string into a Unix timestamp.
+fn parse_twitter_timestamp(value: &str) -> Option<i64> {
+    DateTime::parse_from_str(value, "%a %b %d %H:%M:%S %z %Y")
+        .ok()
+        .map(|dt| dt.timestamp())
 }
 
 impl TryFrom<TweetRecord> for TweetData {
@@ -120,21 +188,28 @@ impl TryFrom<TweetRecord> for TweetData {
             conversation_id: record.conversation_id,
             in_reply_to_status_id: record.in_reply_to_status_id,
             in_reply_to_user_id: record.in_reply_to_user_id,
-            mentions: record.mentions.into_iter().map(|m| MentionedUser {
-                id: m.id,
-                username: m.username,
-                name: m.name,
-            }).collect(),
-            quoted_tweet: record.quoted_tweet
-                .map(|v| serde_json::from_value(v))
+            mentions: record
+                .mentions
+                .into_iter()
+                .map(|m| MentionedUser {
+                    id: m.id,
+                    username: m.username,
+                    name: m.name,
+                })
+                .collect(),
+            quoted_tweet: record
+                .quoted_tweet
+                .map(serde_json::from_value)
                 .transpose()
                 .map_err(|e| Error::Serialization(e.to_string()))?,
-            media: record.media
-                .map(|v| serde_json::from_value(v))
+            media: record
+                .media
+                .map(serde_json::from_value)
                 .transpose()
                 .map_err(|e| Error::Serialization(e.to_string()))?,
-            article: record.article
-                .map(|v| serde_json::from_value(v))
+            article: record
+                .article
+                .map(serde_json::from_value)
                 .transpose()
                 .map_err(|e| Error::Serialization(e.to_string()))?,
             _raw: None,
@@ -189,24 +264,64 @@ impl SurrealDbStorage {
     /// Create a new SurrealDB storage at the default path.
     pub async fn new_default() -> Result<Self> {
         let path = crate::default_db_path();
-        Self::new(&path).await
+        Self::new_local(&path).await
     }
 
     /// Create a new SurrealDB storage at the specified path.
     pub async fn new(path: &Path) -> Result<Self> {
+        Self::new_local(path).await
+    }
+
+    /// Create a new local SurrealDB storage at the specified path.
+    pub async fn new_local(path: &Path) -> Result<Self> {
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| Error::Storage(format!("Failed to create directory: {}", e)))?;
         }
 
-        let db = Surreal::new::<RocksDb>(path)
+        let config = SurrealDbConfig::local(path);
+        Self::new_with_config(&config).await
+    }
+
+    /// Create a new SurrealDB storage using a custom configuration.
+    pub async fn new_with_config(config: &SurrealDbConfig) -> Result<Self> {
+        let db = connect(&config.endpoint)
             .await
-            .map_err(|e| Error::Storage(format!("Failed to open database: {}", e)))?;
+            .map_err(|e| Error::Storage(format!("Failed to connect to database: {}", e)))?;
+
+        if let Some(auth) = &config.auth {
+            match auth {
+                SurrealDbAuth::Root { username, password } => {
+                    db.signin(Root { username, password })
+                        .await
+                        .map_err(|e| Error::Storage(format!("Failed to sign in: {}", e)))?;
+                }
+                SurrealDbAuth::Namespace { username, password } => {
+                    db.signin(Namespace {
+                        namespace: &config.namespace,
+                        username,
+                        password,
+                    })
+                    .await
+                    .map_err(|e| Error::Storage(format!("Failed to sign in: {}", e)))?;
+                }
+                SurrealDbAuth::Database { username, password } => {
+                    db.signin(Database {
+                        namespace: &config.namespace,
+                        database: &config.database,
+                        username,
+                        password,
+                    })
+                    .await
+                    .map_err(|e| Error::Storage(format!("Failed to sign in: {}", e)))?;
+                }
+            }
+        }
 
         // Select namespace and database
-        db.use_ns("bird")
-            .use_db("main")
+        db.use_ns(&config.namespace)
+            .use_db(&config.database)
             .await
             .map_err(|e| Error::Storage(format!("Failed to select database: {}", e)))?;
 
@@ -224,9 +339,16 @@ impl SurrealDbStorage {
             .map_err(|e| Error::Storage(format!("Failed to create tweet table: {}", e)))?;
 
         self.db
-            .query("DEFINE INDEX IF NOT EXISTS tweet_id ON tweet FIELDS id UNIQUE")
+            .query("DEFINE INDEX IF NOT EXISTS tweet_id ON tweet FIELDS tweet_id UNIQUE")
             .await
             .map_err(|e| Error::Storage(format!("Failed to create tweet index: {}", e)))?;
+
+        self.db
+            .query("DEFINE INDEX IF NOT EXISTS tweet_created_at_ts ON tweet FIELDS created_at_ts")
+            .await
+            .map_err(|e| {
+                Error::Storage(format!("Failed to create tweet timestamp index: {}", e))
+            })?;
 
         self.db
             .query("DEFINE TABLE IF NOT EXISTS tweet_collection SCHEMALESS")
@@ -237,6 +359,11 @@ impl SurrealDbStorage {
             .query("DEFINE INDEX IF NOT EXISTS tweet_collection_pk ON tweet_collection FIELDS tweet_id, collection, user_id UNIQUE")
             .await
             .map_err(|e| Error::Storage(format!("Failed to create collection index: {}", e)))?;
+
+        self.db
+            .query("DEFINE INDEX IF NOT EXISTS tweet_collection_lookup ON tweet_collection FIELDS collection, user_id")
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to create collection lookup index: {}", e)))?;
 
         self.db
             .query("DEFINE TABLE IF NOT EXISTS sync_state SCHEMALESS")
@@ -302,12 +429,14 @@ impl TweetStore for SurrealDbStorage {
     async fn get_tweet(&self, id: &str) -> Result<Option<TweetData>> {
         // Query using the record ID syntax
         let query = format!("SELECT * FROM tweet:⟨{}⟩", id);
-        let mut result = self.db
+        let mut result = self
+            .db
             .query(&query)
             .await
             .map_err(|e| Error::Storage(format!("Failed to get tweet: {}", e)))?;
 
-        let records: Vec<TweetRecord> = result.take(0)
+        let records: Vec<TweetRecord> = result
+            .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse tweet: {}", e)))?;
 
         if let Some(record) = records.into_iter().next() {
@@ -320,12 +449,14 @@ impl TweetStore for SurrealDbStorage {
     async fn tweet_exists(&self, id: &str) -> Result<bool> {
         // Query using the record ID syntax
         let query = format!("SELECT tweet_id FROM tweet:⟨{}⟩", id);
-        let mut result = self.db
+        let mut result = self
+            .db
             .query(&query)
             .await
             .map_err(|e| Error::Storage(format!("Failed to check tweet: {}", e)))?;
 
-        let records: Vec<serde_json::Value> = result.take(0)
+        let records: Vec<serde_json::Value> = result
+            .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse result: {}", e)))?;
 
         Ok(!records.is_empty())
@@ -340,15 +471,19 @@ impl TweetStore for SurrealDbStorage {
         let record_refs: Vec<String> = ids.iter().map(|id| format!("tweet:⟨{}⟩", id)).collect();
         let query = format!("SELECT tweet_id FROM [{}]", record_refs.join(", "));
 
-        let mut result = self.db
+        let mut result = self
+            .db
             .query(&query)
             .await
             .map_err(|e| Error::Storage(format!("Failed to filter ids: {}", e)))?;
 
         #[derive(Deserialize)]
-        struct IdRecord { tweet_id: String }
+        struct IdRecord {
+            tweet_id: String,
+        }
 
-        let records: Vec<IdRecord> = result.take(0)
+        let records: Vec<IdRecord> = result
+            .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse ids: {}", e)))?;
 
         Ok(records.into_iter().map(|r| r.tweet_id).collect())
@@ -366,45 +501,21 @@ impl TweetStore for SurrealDbStorage {
         let collection_owned = collection.to_string();
         let user_id_owned = user_id.to_string();
 
-        // First get ALL tweet IDs from the collection (no pagination here)
-        let mut coll_result = self.db
+        let mut tweet_result = self
+            .db
             .query(
-                "SELECT tweet_id FROM tweet_collection
-                 WHERE collection = $collection AND user_id = $user_id"
+                "SELECT * FROM tweet
+                 WHERE tweet_id IN (
+                    SELECT tweet_id FROM tweet_collection
+                    WHERE collection = $collection AND user_id = $user_id
+                 )
+                 ORDER BY created_at_ts DESC
+                 LIMIT $limit START $offset",
             )
             .bind(("collection", collection_owned))
             .bind(("user_id", user_id_owned))
-            .await
-            .map_err(|e| Error::Storage(format!("Failed to get collection: {}", e)))?;
-
-        #[derive(Deserialize)]
-        struct CollectionRecord {
-            tweet_id: String,
-        }
-
-        let coll_records: Vec<CollectionRecord> = coll_result
-            .take(0)
-            .map_err(|e| Error::Storage(format!("Failed to parse collection: {}", e)))?;
-
-        if coll_records.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Collect tweet IDs
-        let tweet_ids: Vec<String> = coll_records.iter().map(|r| r.tweet_id.clone()).collect();
-
-        // Fetch tweets using SurrealDB record ID syntax, sorted by created_at DESC
-        // Build array of record references: [tweet:id1, tweet:id2, ...]
-        let record_refs: Vec<String> = tweet_ids.iter().map(|id| format!("tweet:⟨{}⟩", id)).collect();
-        let query = format!(
-            "SELECT * FROM [{}] ORDER BY created_at DESC LIMIT {} START {}",
-            record_refs.join(", "),
-            limit,
-            offset
-        );
-
-        let mut tweet_result = self.db
-            .query(&query)
+            .bind(("limit", limit))
+            .bind(("offset", offset))
             .await
             .map_err(|e| Error::Storage(format!("Failed to get tweets: {}", e)))?;
 
@@ -433,9 +544,7 @@ impl TweetStore for SurrealDbStorage {
         let now = Utc::now();
 
         // Check if already exists
-        let exists = self
-            .is_in_collection(tweet_id, collection, user_id)
-            .await?;
+        let exists = self.is_in_collection(tweet_id, collection, user_id).await?;
 
         if exists {
             // Update existing record
@@ -459,7 +568,7 @@ impl TweetStore for SurrealDbStorage {
                         collection: $collection,
                         user_id: $user_id,
                         added_at: $added_at
-                    }"
+                    }",
                 )
                 .bind(("tweet_id", tweet_id_owned))
                 .bind(("collection", collection_owned))
@@ -482,13 +591,14 @@ impl TweetStore for SurrealDbStorage {
         let collection_owned = collection.to_string();
         let user_id_owned = user_id.to_string();
 
-        let mut result = self.db
+        let mut result = self
+            .db
             .query(
                 "SELECT tweet_id FROM tweet_collection
                  WHERE tweet_id = $tweet_id
                  AND collection = $collection
                  AND user_id = $user_id
-                 LIMIT 1"
+                 LIMIT 1",
             )
             .bind(("tweet_id", tweet_id_owned))
             .bind(("collection", collection_owned))
@@ -496,7 +606,8 @@ impl TweetStore for SurrealDbStorage {
             .await
             .map_err(|e| Error::Storage(format!("Failed to check collection: {}", e)))?;
 
-        let records: Vec<serde_json::Value> = result.take(0)
+        let records: Vec<serde_json::Value> = result
+            .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse result: {}", e)))?;
 
         Ok(!records.is_empty())
@@ -506,11 +617,12 @@ impl TweetStore for SurrealDbStorage {
         let collection_owned = collection.to_string();
         let user_id_owned = user_id.to_string();
 
-        let mut result = self.db
+        let mut result = self
+            .db
             .query(
                 "SELECT count() as count FROM tweet_collection
                  WHERE collection = $collection AND user_id = $user_id
-                 GROUP ALL"
+                 GROUP ALL",
             )
             .bind(("collection", collection_owned))
             .bind(("user_id", user_id_owned))
@@ -518,9 +630,12 @@ impl TweetStore for SurrealDbStorage {
             .map_err(|e| Error::Storage(format!("Failed to count collection: {}", e)))?;
 
         #[derive(Deserialize)]
-        struct CountResult { count: u64 }
+        struct CountResult {
+            count: u64,
+        }
 
-        let records: Vec<CountResult> = result.take(0)
+        let records: Vec<CountResult> = result
+            .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse count: {}", e)))?;
 
         Ok(records.first().map(|r| r.count).unwrap_or(0))
@@ -533,18 +648,20 @@ impl SyncStateStore for SurrealDbStorage {
         let collection_owned = collection.to_string();
         let user_id_owned = user_id.to_string();
 
-        let mut result = self.db
+        let mut result = self
+            .db
             .query(
                 "SELECT * FROM sync_state
                  WHERE collection = $collection AND user_id = $user_id
-                 LIMIT 1"
+                 LIMIT 1",
             )
             .bind(("collection", collection_owned))
             .bind(("user_id", user_id_owned))
             .await
             .map_err(|e| Error::Storage(format!("Failed to get sync state: {}", e)))?;
 
-        let records: Vec<SyncStateRecord> = result.take(0)
+        let records: Vec<SyncStateRecord> = result
+            .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse sync state: {}", e)))?;
 
         Ok(records.into_iter().next().map(|r| r.into()))
@@ -558,7 +675,7 @@ impl SyncStateStore for SurrealDbStorage {
         self.db
             .query(
                 "UPSERT sync_state CONTENT $record
-                 WHERE collection = $collection AND user_id = $user_id"
+                 WHERE collection = $collection AND user_id = $user_id",
             )
             .bind(("record", record))
             .bind(("collection", collection_owned))
@@ -576,7 +693,7 @@ impl SyncStateStore for SurrealDbStorage {
         self.db
             .query(
                 "DELETE FROM sync_state
-                 WHERE collection = $collection AND user_id = $user_id"
+                 WHERE collection = $collection AND user_id = $user_id",
             )
             .bind(("collection", collection_owned))
             .bind(("user_id", user_id_owned))
@@ -589,13 +706,15 @@ impl SyncStateStore for SurrealDbStorage {
     async fn get_all_sync_states(&self, user_id: &str) -> Result<Vec<SyncState>> {
         let user_id_owned = user_id.to_string();
 
-        let mut result = self.db
+        let mut result = self
+            .db
             .query("SELECT * FROM sync_state WHERE user_id = $user_id")
             .bind(("user_id", user_id_owned))
             .await
             .map_err(|e| Error::Storage(format!("Failed to get sync states: {}", e)))?;
 
-        let records: Vec<SyncStateRecord> = result.take(0)
+        let records: Vec<SyncStateRecord> = result
+            .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse sync states: {}", e)))?;
 
         Ok(records.into_iter().map(|r| r.into()).collect())
@@ -640,13 +759,15 @@ impl UserStore for SurrealDbStorage {
     async fn get_user_by_username(&self, username: &str) -> Result<Option<MentionedUser>> {
         let username_lower = username.to_lowercase();
 
-        let mut result = self.db
+        let mut result = self
+            .db
             .query("SELECT * FROM twitter_user WHERE username_lower = $username LIMIT 1")
             .bind(("username", username_lower))
             .await
             .map_err(|e| Error::Storage(format!("Failed to get user: {}", e)))?;
 
-        let records: Vec<TwitterUserRecord> = result.take(0)
+        let records: Vec<TwitterUserRecord> = result
+            .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse user: {}", e)))?;
 
         Ok(records.into_iter().next().map(|r| MentionedUser {
@@ -658,12 +779,14 @@ impl UserStore for SurrealDbStorage {
 
     async fn get_user_by_id(&self, id: &str) -> Result<Option<MentionedUser>> {
         let query = format!("SELECT * FROM twitter_user:⟨{}⟩", id);
-        let mut result = self.db
+        let mut result = self
+            .db
             .query(&query)
             .await
             .map_err(|e| Error::Storage(format!("Failed to get user: {}", e)))?;
 
-        let records: Vec<TwitterUserRecord> = result.take(0)
+        let records: Vec<TwitterUserRecord> = result
+            .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse user: {}", e)))?;
 
         Ok(records.into_iter().next().map(|r| MentionedUser {
@@ -682,17 +805,19 @@ impl UserStore for SurrealDbStorage {
         let user_id_owned = user_id.to_string();
 
         // Query tweets where mentions array contains a user with this ID
-        let mut result = self.db
+        let mut result = self
+            .db
             .query(
                 "SELECT * FROM tweet WHERE mentions[*].id CONTAINS $user_id
-                 ORDER BY created_at DESC LIMIT $limit"
+                 ORDER BY created_at DESC LIMIT $limit",
             )
             .bind(("user_id", user_id_owned))
             .bind(("limit", limit))
             .await
             .map_err(|e| Error::Storage(format!("Failed to get tweets: {}", e)))?;
 
-        let records: Vec<TweetRecord> = result.take(0)
+        let records: Vec<TweetRecord> = result
+            .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse tweets: {}", e)))?;
 
         records.into_iter().map(|r| r.try_into()).collect()
@@ -706,17 +831,19 @@ impl UserStore for SurrealDbStorage {
         let limit = limit.unwrap_or(20);
         let user_id_owned = user_id.to_string();
 
-        let mut result = self.db
+        let mut result = self
+            .db
             .query(
                 "SELECT * FROM tweet WHERE in_reply_to_user_id = $user_id
-                 ORDER BY created_at DESC LIMIT $limit"
+                 ORDER BY created_at DESC LIMIT $limit",
             )
             .bind(("user_id", user_id_owned))
             .bind(("limit", limit))
             .await
             .map_err(|e| Error::Storage(format!("Failed to get tweets: {}", e)))?;
 
-        let records: Vec<TweetRecord> = result.take(0)
+        let records: Vec<TweetRecord> = result
+            .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse tweets: {}", e)))?;
 
         records.into_iter().map(|r| r.try_into()).collect()

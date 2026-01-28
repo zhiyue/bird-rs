@@ -27,14 +27,16 @@ bird sync likes
 
 ## Commands
 
-| Command            | Description               |
-| ------------------ | ------------------------- |
-| `bird <id>`        | Read a tweet by ID or URL |
-| `bird whoami`      | Show logged-in account    |
-| `bird likes`       | Fetch your liked tweets   |
-| `bird bookmarks`   | Fetch your bookmarks      |
-| `bird sync likes`  | Sync likes to local DB    |
-| `bird sync status` | Show sync progress        |
+| Command               | Description                   |
+| --------------------- | ----------------------------- |
+| `bird <id>`           | Read a tweet by ID or URL     |
+| `bird whoami`         | Show logged-in account        |
+| `bird likes`          | Fetch your liked tweets       |
+| `bird bookmarks`      | Fetch your bookmarks          |
+| `bird sync likes`     | Sync likes to local DB        |
+| `bird sync bookmarks` | Sync bookmarks to local DB    |
+| `bird sync posts`     | Sync your own tweets to DB    |
+| `bird sync status`    | Show sync progress            |
 
 ## Sync
 
@@ -42,8 +44,10 @@ Bird stores tweets in a local [SurrealDB] database (`~/.bird/bird.db`) for
 offline access and incremental sync.
 
 ```bash
-# Initial sync (fetches 10 pages by default)
+# Sync your likes, bookmarks, or own posts
 bird sync likes
+bird sync bookmarks
+bird sync posts
 
 # Continue fetching older tweets
 bird sync backfill likes
@@ -52,7 +56,7 @@ bird sync backfill likes
 bird sync status
 ```
 
-The sync is **bidirectional**: it catches up on new likes and can backfill your
+The sync is **bidirectional**: it catches up on new items and can backfill your
 full history over multiple sessions.
 
 ## Authentication

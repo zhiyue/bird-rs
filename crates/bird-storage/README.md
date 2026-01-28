@@ -6,19 +6,31 @@ Storage backends for bird. Implements the storage traits from [bird-core].
 
 | Backend            | Description                                   |
 | ------------------ | --------------------------------------------- |
-| `SurrealDbStorage` | Persistent storage using embedded [SurrealDB] |
+| `SurrealDbStorage` | Persistent storage using [SurrealDB] (local or remote) |
 | `MemoryStorage`    | In-memory storage for testing                 |
 
 ## Usage
 
 ```rust
-use bird_storage::{SurrealDbStorage, TweetStore, SyncStateStore};
+use bird_storage::{SurrealDbStorage, SurrealDbConfig, SurrealDbAuth, TweetStore, SyncStateStore};
 
 // Create storage (uses ~/.bird/bird.db by default)
 let storage = SurrealDbStorage::new_default().await?;
 
 // Or with custom path
 let storage = SurrealDbStorage::new("/path/to/db").await?;
+
+// Or connect to a remote SurrealDB endpoint
+let config = SurrealDbConfig {
+    endpoint: "wss://cloud.surrealdb.com".to_string(),
+    namespace: "bird".to_string(),
+    database: "main".to_string(),
+    auth: Some(SurrealDbAuth::Root {
+        username: "user".to_string(),
+        password: "pass".to_string(),
+    }),
+};
+let storage = SurrealDbStorage::new_with_config(&config).await?;
 
 // Store tweets
 storage.upsert_tweet(&tweet).await?;
@@ -50,8 +62,11 @@ Default: `~/.bird/bird.db`
 Override via:
 
 - `SurrealDbStorage::new("/custom/path")`
+- `SurrealDbStorage::new_with_config(&SurrealDbConfig { .. })`
 - `BIRD_DB_PATH` environment variable
+- `BIRD_DB_URL` environment variable (remote endpoint)
 - `--db-path` CLI flag
+- `--db-url` CLI flag
 
 ## Testing
 
@@ -62,6 +77,18 @@ use bird_storage::MemoryStorage;
 
 let storage = MemoryStorage::new();
 // Same API as SurrealDbStorage
+```
+
+## StorageConfig
+
+For higher-level callers, you can build a config and create a backend dynamically:
+
+```rust
+use bird_storage::{StorageConfig, SurrealDbConfig, create_storage};
+use std::path::Path;
+
+let config = StorageConfig::SurrealDb(SurrealDbConfig::local(Path::new("/path/to/db")));
+let storage = create_storage(&config).await?;
 ```
 
 ## Dependencies

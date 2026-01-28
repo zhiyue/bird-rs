@@ -52,15 +52,50 @@ bird sync likes
 bird sync bookmarks
 bird sync posts
 
-# Continue fetching older tweets
+# Continue fetching older tweets (explicit backfill)
 bird sync backfill likes
 
 # Check progress
 bird sync status
 ```
 
-The sync is **bidirectional**: it catches up on new items and can backfill your
-full history over multiple sessions.
+The sync is **forward-only by default**: it catches up on new items, and you can
+explicitly backfill older history over multiple sessions.
+
+## Storage
+
+By default, Bird uses an embedded SurrealDB (RocksDB) database at
+`~/.bird/bird.db`. To use a remote SurrealDB (including Surreal Cloud), pass a
+remote endpoint and optional credentials:
+
+```bash
+bird sync likes \
+  --db-url "wss://cloud.surrealdb.com" \
+  --db-namespace bird \
+  --db-name main \
+  --db-user your_user \
+  --db-pass your_pass
+```
+
+By default, Bird uses **root** authentication when credentials are provided. To
+use namespace or database authentication, set `--db-auth namespace` or
+`--db-auth database`.
+
+Environment variables are also supported:
+
+```bash
+export BIRD_DB_URL="wss://cloud.surrealdb.com"
+export BIRD_DB_NAMESPACE="bird"
+export BIRD_DB_NAME="main"
+export BIRD_DB_USER="your_user"
+export BIRD_DB_PASS="your_pass"
+```
+
+For testing, you can use in-memory storage:
+
+```bash
+bird --storage memory sync likes
+```
 
 ## Authentication
 

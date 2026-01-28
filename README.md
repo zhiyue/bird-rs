@@ -41,6 +41,8 @@ bird sync likes
 | `bird sync posts`     | Sync your own tweets to DB    |
 | `bird sync status`    | Show sync progress            |
 | `bird db backfill-created-at` | Backfill created_at_ts for stored tweets |
+| `bird db status`      | Show database status and counts |
+| `bird db optimize`    | Ensure schema and indexes exist |
 | `bird config init`    | Write a default config file   |
 
 ## Sync

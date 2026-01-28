@@ -26,6 +26,19 @@ pub struct BackfillCreatedAtResult {
     pub skipped: usize,
 }
 
+/// Aggregate counts for database status.
+#[derive(Debug, Clone, Copy)]
+pub struct DbStats {
+    /// Total tweets stored.
+    pub tweets: u64,
+    /// Total collection entries.
+    pub collections: u64,
+    /// Total sync state entries.
+    pub sync_states: u64,
+    /// Tweets missing created_at_ts.
+    pub missing_created_at_ts: u64,
+}
+
 /// Authentication configuration for remote SurrealDB connections.
 #[derive(Debug, Clone)]
 pub enum SurrealDbAuth {
@@ -409,6 +422,53 @@ impl SurrealDbStorage {
         }
 
         Ok(BackfillCreatedAtResult { updated, skipped })
+    }
+
+    /// Ensure database schema and indexes exist.
+    pub async fn ensure_schema(&self) -> Result<()> {
+        self.init_schema().await
+    }
+
+    /// Get aggregate counts for database status.
+    pub async fn stats(&self) -> Result<DbStats> {
+        let tweets = self
+            .count_query("SELECT count() as count FROM tweet GROUP ALL")
+            .await?;
+        let collections = self
+            .count_query("SELECT count() as count FROM tweet_collection GROUP ALL")
+            .await?;
+        let sync_states = self
+            .count_query("SELECT count() as count FROM sync_state GROUP ALL")
+            .await?;
+        let missing_created_at_ts = self
+            .count_query("SELECT count() as count FROM tweet WHERE created_at_ts IS NONE GROUP ALL")
+            .await?;
+
+        Ok(DbStats {
+            tweets,
+            collections,
+            sync_states,
+            missing_created_at_ts,
+        })
+    }
+
+    async fn count_query(&self, query: &str) -> Result<u64> {
+        let mut result = self
+            .db
+            .query(query)
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to fetch count: {e}")))?;
+
+        #[derive(Deserialize)]
+        struct CountResult {
+            count: u64,
+        }
+
+        let records: Vec<CountResult> = result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse count: {e}")))?;
+
+        Ok(records.first().map(|r| r.count).unwrap_or(0))
     }
 
     /// Initialize the database schema.

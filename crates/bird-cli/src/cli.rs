@@ -314,6 +314,11 @@ enum DbAction {
         batch_size: Option<u32>,
     },
 
+    /// Show database status and counts.
+    Status,
+
+    /// Ensure database schema and indexes exist.
+    Optimize,
 }
 
 #[derive(Subcommand)]
@@ -405,6 +410,8 @@ impl Cli {
                 DbAction::BackfillCreatedAt { batch_size } => {
                     db::run_backfill_created_at(&self, *batch_size, show_emoji).await
                 }
+                DbAction::Status => db::run_status(&self, show_emoji).await,
+                DbAction::Optimize => db::run_optimize(&self, show_emoji).await,
             },
             Some(Commands::Config { action }) => match action {
                 ConfigAction::Init { force } => config::run_init(&self, *force, show_emoji).await,

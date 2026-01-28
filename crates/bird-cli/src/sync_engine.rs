@@ -177,6 +177,7 @@ impl SyncEngine {
         state.backfill_cursor = result.next_cursor;
         state.has_more_history = result.has_more;
         state.total_synced = total_fetched as u64;
+        apply_rate_limit_info(&mut state, &options.rate_limit);
         self.storage.update_sync_state(&state).await?;
 
         Ok(SyncResult {
@@ -236,6 +237,7 @@ impl SyncEngine {
 
         // Update sync state for forward sync
         sync_state.update_forward(newest_id, total_fetched as u64);
+        apply_rate_limit_info(&mut sync_state, &options.rate_limit);
         self.storage.update_sync_state(&sync_state).await?;
 
         Ok(SyncResult {
@@ -299,6 +301,7 @@ impl SyncEngine {
             result.has_more,
             total_fetched as u64,
         );
+        apply_rate_limit_info(&mut sync_state, &options.rate_limit);
         self.storage.update_sync_state(&sync_state).await?;
 
         Ok(SyncResult {
@@ -395,5 +398,14 @@ impl SyncEngine {
                 collection.as_str()
             )),
         }
+    }
+}
+
+fn apply_rate_limit_info(state: &mut bird_client::SyncState, rate_limit: &RateLimitConfig) {
+    let info = rate_limit.last_rate_limit_info();
+    if info.last_rate_limited_at.is_some() {
+        state.last_rate_limited_at = info.last_rate_limited_at;
+        state.last_rate_limit_backoff_ms = info.last_backoff_ms;
+        state.last_rate_limit_retries = info.last_retries;
     }
 }

@@ -119,6 +119,12 @@ pub struct SyncState {
     pub has_more_history: bool,
     /// Timestamp of the last sync.
     pub last_sync_at: DateTime<Utc>,
+    /// Timestamp of the most recent rate limit event.
+    pub last_rate_limited_at: Option<DateTime<Utc>>,
+    /// Backoff delay used on the most recent rate limit event.
+    pub last_rate_limit_backoff_ms: Option<u64>,
+    /// Retry attempt count on the most recent rate limit event.
+    pub last_rate_limit_retries: Option<u32>,
     /// Total number of items synced.
     pub total_synced: u64,
 }
@@ -134,6 +140,9 @@ impl SyncState {
             backfill_cursor: None,
             has_more_history: true, // Assume there's history until proven otherwise
             last_sync_at: Utc::now(),
+            last_rate_limited_at: None,
+            last_rate_limit_backoff_ms: None,
+            last_rate_limit_retries: None,
             total_synced: 0,
         }
     }

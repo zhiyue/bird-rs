@@ -236,6 +236,9 @@ struct SyncStateRecord {
     backfill_cursor: Option<String>,
     has_more_history: bool,
     last_sync_at: DateTime<Utc>,
+    last_rate_limited_at: Option<DateTime<Utc>>,
+    last_rate_limit_backoff_ms: Option<u64>,
+    last_rate_limit_retries: Option<u32>,
     total_synced: u64,
 }
 
@@ -249,6 +252,9 @@ impl From<&SyncState> for SyncStateRecord {
             backfill_cursor: state.backfill_cursor.clone(),
             has_more_history: state.has_more_history,
             last_sync_at: state.last_sync_at,
+            last_rate_limited_at: state.last_rate_limited_at,
+            last_rate_limit_backoff_ms: state.last_rate_limit_backoff_ms,
+            last_rate_limit_retries: state.last_rate_limit_retries,
             total_synced: state.total_synced,
         }
     }
@@ -264,6 +270,9 @@ impl From<SyncStateRecord> for SyncState {
             backfill_cursor: record.backfill_cursor,
             has_more_history: record.has_more_history,
             last_sync_at: record.last_sync_at,
+            last_rate_limited_at: record.last_rate_limited_at,
+            last_rate_limit_backoff_ms: record.last_rate_limit_backoff_ms,
+            last_rate_limit_retries: record.last_rate_limit_retries,
             total_synced: record.total_synced,
         }
     }

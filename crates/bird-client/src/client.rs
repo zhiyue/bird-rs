@@ -6,8 +6,10 @@ use crate::TwitterClientOptions;
 use bird_core::{
     CurrentUser, CurrentUserResult, PaginatedResult, PaginationOptions, Result, TweetData,
 };
+use chrono::{DateTime, Utc};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE, COOKIE, USER_AGENT};
 use reqwest::Client;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::sleep;
 use uuid::Uuid;
@@ -23,6 +25,19 @@ pub struct RateLimitConfig {
     pub initial_backoff_ms: u64,
     /// Maximum backoff delay in milliseconds (default: 16000ms).
     pub max_backoff_ms: u64,
+    /// Rate limit stats for the most recent event.
+    stats: Arc<Mutex<RateLimitInfo>>,
+}
+
+/// Observed rate limit info from the most recent 429 event.
+#[derive(Debug, Clone, Default)]
+pub struct RateLimitInfo {
+    /// Timestamp of the most recent rate limit event.
+    pub last_rate_limited_at: Option<DateTime<Utc>>,
+    /// Backoff delay used on the most recent rate limit event.
+    pub last_backoff_ms: Option<u64>,
+    /// Retry attempt count on the most recent rate limit event.
+    pub last_retries: Option<u32>,
 }
 
 impl Default for RateLimitConfig {
@@ -32,6 +47,7 @@ impl Default for RateLimitConfig {
             max_retries: 4,           // Try up to 4 times on 429
             initial_backoff_ms: 1000, // Start with 1s backoff
             max_backoff_ms: 16000,    // Cap at 16s backoff
+            stats: Arc::new(Mutex::new(RateLimitInfo::default())),
         }
     }
 }
@@ -52,7 +68,23 @@ impl RateLimitConfig {
             max_retries: 0,
             initial_backoff_ms: 0,
             max_backoff_ms: 0,
+            stats: Arc::new(Mutex::new(RateLimitInfo::default())),
         }
+    }
+
+    /// Get the most recent rate limit info, if any.
+    pub fn last_rate_limit_info(&self) -> RateLimitInfo {
+        self.stats
+            .lock()
+            .map(|info| info.clone())
+            .unwrap_or_else(|err| err.into_inner().clone())
+    }
+
+    fn record_rate_limit(&self, backoff_ms: u64, retries: u32) {
+        let mut info = self.stats.lock().unwrap_or_else(|err| err.into_inner());
+        info.last_rate_limited_at = Some(Utc::now());
+        info.last_backoff_ms = Some(backoff_ms);
+        info.last_retries = Some(retries);
     }
 }
 
@@ -581,6 +613,7 @@ impl TwitterClient {
 
                     if is_rate_limit && retries < rate_limit.max_retries {
                         retries += 1;
+                        rate_limit.record_rate_limit(backoff_ms, retries);
                         eprintln!(
                             "Rate limited, backing off for {}ms (attempt {}/{})",
                             backoff_ms, retries, rate_limit.max_retries

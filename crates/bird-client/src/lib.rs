@@ -42,7 +42,7 @@ pub use bird_core::{
     PaginatedResult, PaginationOptions, Result, SearchResult, SyncState, TweetArticle, TweetAuthor,
     TweetData, TweetMedia, TwitterList, TwitterUser,
 };
-pub use client::{RateLimitConfig, TwitterClient};
+pub use client::{RateLimitConfig, RateLimitInfo, TwitterClient};
 pub use cookies::TwitterCookies;
 
 /// Options for creating a Twitter client.

@@ -279,10 +279,7 @@ pub async fn run_status(cli: &Cli, show_emoji: bool) -> anyhow::Result<()> {
 
         println!("  {}{}", collection_icon, state.collection.bold());
         println!("    Total synced: {}", state.total_synced);
-        println!(
-            "    Last sync: {}",
-            format_relative_time(state.last_sync_at)
-        );
+        println!("    Last sync: {}", format_sync_time(state.last_sync_at));
 
         if let Some(ref newest_id) = state.newest_item_id {
             println!("    Newest ID: {}", newest_id.dimmed());
@@ -290,6 +287,20 @@ pub async fn run_status(cli: &Cli, show_emoji: bool) -> anyhow::Result<()> {
 
         if let Some(ref oldest_id) = state.oldest_item_id {
             println!("    Oldest ID: {}", oldest_id.dimmed());
+        }
+
+        // Show rate limit info
+        if let Some(last_rate_limited_at) = state.last_rate_limited_at {
+            let mut info = format_sync_time(last_rate_limited_at);
+            if let Some(backoff_ms) = state.last_rate_limit_backoff_ms {
+                info.push_str(&format!(" · backoff {}ms", backoff_ms));
+            }
+            if let Some(retries) = state.last_rate_limit_retries {
+                info.push_str(&format!(" · retries {}", retries));
+            }
+            println!("    Rate limit: {}", info.dimmed());
+        } else {
+            println!("    Rate limit: {}", "none".dimmed());
         }
 
         // Show backfill status
@@ -358,4 +369,10 @@ fn format_relative_time(time: chrono::DateTime<Utc>) -> String {
     } else {
         time.format("%Y-%m-%d %H:%M").to_string()
     }
+}
+
+fn format_sync_time(time: chrono::DateTime<Utc>) -> String {
+    let absolute = time.format("%Y-%m-%d %H:%M UTC").to_string();
+    let relative = format_relative_time(time);
+    format!("{} ({})", absolute, relative)
 }

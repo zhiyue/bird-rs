@@ -3,7 +3,9 @@
 use crate::constants::{features, Operation, BEARER_TOKEN, DEFAULT_USER_AGENT, TWITTER_API_BASE};
 use crate::cookies::TwitterCookies;
 use crate::TwitterClientOptions;
-use bird_core::{CurrentUser, CurrentUserResult, PaginatedResult, PaginationOptions, Result, TweetData};
+use bird_core::{
+    CurrentUser, CurrentUserResult, PaginatedResult, PaginationOptions, Result, TweetData,
+};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE, COOKIE, USER_AGENT};
 use reqwest::Client;
 use std::time::Duration;
@@ -158,7 +160,11 @@ impl TwitterClient {
     }
 
     /// Build a GraphQL URL for the given operation.
-    pub(crate) fn build_graphql_url(&self, operation: Operation, variables: &serde_json::Value) -> String {
+    pub(crate) fn build_graphql_url(
+        &self,
+        operation: Operation,
+        variables: &serde_json::Value,
+    ) -> String {
         let query_id = operation.default_query_id();
         let features_json = serde_json::to_string(&features::default_features()).unwrap();
         let variables_json = serde_json::to_string(variables).unwrap();
@@ -313,12 +319,55 @@ impl TwitterClient {
         self.fetch_likes(user_id, options).await
     }
 
+    /// Get user's likes with multi-page pagination support.
+    pub async fn get_likes_paginated_with_rate_limit(
+        &self,
+        user_id: &str,
+        options: &PaginationOptions,
+        rate_limit: &RateLimitConfig,
+    ) -> Result<PaginatedResult<TweetData>> {
+        Self::fetch_all_pages_with_rate_limit(
+            |cursor| async {
+                let opts = if let Some(c) = cursor {
+                    PaginationOptions::new().with_cursor(c)
+                } else {
+                    PaginationOptions::new()
+                };
+                self.fetch_likes(user_id, &opts).await
+            },
+            options,
+            rate_limit,
+        )
+        .await
+    }
+
     /// Get user's bookmarks with pagination.
     pub async fn get_bookmarks(
         &self,
         options: &PaginationOptions,
     ) -> Result<PaginatedResult<TweetData>> {
         self.fetch_bookmarks(options).await
+    }
+
+    /// Get user's bookmarks with multi-page pagination support.
+    pub async fn get_bookmarks_paginated_with_rate_limit(
+        &self,
+        options: &PaginationOptions,
+        rate_limit: &RateLimitConfig,
+    ) -> Result<PaginatedResult<TweetData>> {
+        Self::fetch_all_pages_with_rate_limit(
+            |cursor| async {
+                let opts = if let Some(c) = cursor {
+                    PaginationOptions::new().with_cursor(c)
+                } else {
+                    PaginationOptions::new()
+                };
+                self.fetch_bookmarks(&opts).await
+            },
+            options,
+            rate_limit,
+        )
+        .await
     }
 
     /// Get home timeline with pagination.
@@ -336,6 +385,28 @@ impl TwitterClient {
         options: &PaginationOptions,
     ) -> Result<PaginatedResult<TweetData>> {
         self.fetch_user_tweets(user_id, options).await
+    }
+
+    /// Get user's own tweets with multi-page pagination support.
+    pub async fn get_user_tweets_paginated_with_rate_limit(
+        &self,
+        user_id: &str,
+        options: &PaginationOptions,
+        rate_limit: &RateLimitConfig,
+    ) -> Result<PaginatedResult<TweetData>> {
+        Self::fetch_all_pages_with_rate_limit(
+            |cursor| async {
+                let opts = if let Some(c) = cursor {
+                    PaginationOptions::new().with_cursor(c)
+                } else {
+                    PaginationOptions::new()
+                };
+                self.fetch_user_tweets(user_id, &opts).await
+            },
+            options,
+            rate_limit,
+        )
+        .await
     }
 
     /// Fetch all pages of likes (convenience method).
@@ -361,19 +432,8 @@ impl TwitterClient {
         } else {
             options = options.fetch_all();
         }
-        self.fetch_all_pages_with_rate_limit(
-            |cursor| async {
-                let opts = if let Some(c) = cursor {
-                    PaginationOptions::new().with_cursor(c)
-                } else {
-                    PaginationOptions::new()
-                };
-                self.fetch_likes(user_id, &opts).await
-            },
-            &options,
-            rate_limit,
-        )
-        .await
+        self.get_likes_paginated_with_rate_limit(user_id, &options, rate_limit)
+            .await
     }
 
     /// Fetch all pages of bookmarks (convenience method).
@@ -397,19 +457,8 @@ impl TwitterClient {
         } else {
             options = options.fetch_all();
         }
-        self.fetch_all_pages_with_rate_limit(
-            |cursor| async {
-                let opts = if let Some(c) = cursor {
-                    PaginationOptions::new().with_cursor(c)
-                } else {
-                    PaginationOptions::new()
-                };
-                self.fetch_bookmarks(&opts).await
-            },
-            &options,
-            rate_limit,
-        )
-        .await
+        self.get_bookmarks_paginated_with_rate_limit(&options, rate_limit)
+            .await
     }
 
     /// Fetch all pages of user's own tweets (convenience method).
@@ -435,38 +484,12 @@ impl TwitterClient {
         } else {
             options = options.fetch_all();
         }
-        self.fetch_all_pages_with_rate_limit(
-            |cursor| async {
-                let opts = if let Some(c) = cursor {
-                    PaginationOptions::new().with_cursor(c)
-                } else {
-                    PaginationOptions::new()
-                };
-                self.fetch_user_tweets(user_id, &opts).await
-            },
-            &options,
-            rate_limit,
-        )
-        .await
-    }
-
-    /// Internal helper to fetch all pages using a fetch function (no rate limiting).
-    async fn fetch_all_pages<F, Fut>(
-        &self,
-        fetch_fn: F,
-        options: &PaginationOptions,
-    ) -> Result<PaginatedResult<TweetData>>
-    where
-        F: Fn(Option<String>) -> Fut,
-        Fut: std::future::Future<Output = Result<PaginatedResult<TweetData>>>,
-    {
-        self.fetch_all_pages_with_rate_limit(fetch_fn, options, &RateLimitConfig::none())
+        self.get_user_tweets_paginated_with_rate_limit(user_id, &options, rate_limit)
             .await
     }
 
     /// Internal helper to fetch all pages with rate limiting.
     async fn fetch_all_pages_with_rate_limit<F, Fut>(
-        &self,
         fetch_fn: F,
         options: &PaginationOptions,
         rate_limit: &RateLimitConfig,
@@ -494,9 +517,7 @@ impl TwitterClient {
             }
 
             // Fetch with retry on rate limit
-            let result = self
-                .fetch_with_backoff(&fetch_fn, cursor.clone(), rate_limit)
-                .await?;
+            let result = Self::fetch_with_backoff(&fetch_fn, cursor.clone(), rate_limit).await?;
 
             // Check for stop_at_id
             if let Some(ref stop_id) = options.stop_at_id {
@@ -539,7 +560,6 @@ impl TwitterClient {
 
     /// Fetch with exponential backoff on rate limit errors.
     async fn fetch_with_backoff<F, Fut>(
-        &self,
         fetch_fn: &F,
         cursor: Option<String>,
         rate_limit: &RateLimitConfig,
@@ -563,9 +583,7 @@ impl TwitterClient {
                         retries += 1;
                         eprintln!(
                             "Rate limited, backing off for {}ms (attempt {}/{})",
-                            backoff_ms,
-                            retries,
-                            rate_limit.max_retries
+                            backoff_ms, retries, rate_limit.max_retries
                         );
                         sleep(Duration::from_millis(backoff_ms)).await;
                         // Exponential backoff with cap
@@ -576,6 +594,116 @@ impl TwitterClient {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bird_core::TweetAuthor;
+
+    fn make_tweet(id: &str) -> TweetData {
+        TweetData {
+            id: id.to_string(),
+            text: format!("tweet {}", id),
+            author: TweetAuthor {
+                username: "tester".to_string(),
+                name: "Tester".to_string(),
+            },
+            author_id: None,
+            created_at: None,
+            reply_count: None,
+            retweet_count: None,
+            like_count: None,
+            conversation_id: None,
+            in_reply_to_status_id: None,
+            in_reply_to_user_id: None,
+            mentions: Vec::new(),
+            quoted_tweet: None,
+            media: None,
+            article: None,
+            _raw: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_all_pages_stops_at_known_id() {
+        let pages = [
+            (
+                None,
+                PaginatedResult::new(
+                    vec![make_tweet("5"), make_tweet("4"), make_tweet("3")],
+                    Some("c1".to_string()),
+                ),
+            ),
+            (
+                Some("c1".to_string()),
+                PaginatedResult::new(vec![make_tweet("2"), make_tweet("1")], None),
+            ),
+        ];
+
+        let options = PaginationOptions::new()
+            .with_stop_at_id("3")
+            .with_max_pages(10);
+        let rate_limit = RateLimitConfig::none();
+
+        let result = TwitterClient::fetch_all_pages_with_rate_limit(
+            |cursor| {
+                let page = pages
+                    .iter()
+                    .find(|(c, _)| c.as_ref() == cursor.as_ref())
+                    .map(|(_, p)| p.clone())
+                    .unwrap_or_else(PaginatedResult::empty);
+                async move { Ok(page) }
+            },
+            &options,
+            &rate_limit,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.items.len(), 2);
+        assert!(result.items.iter().all(|t| t.id == "5" || t.id == "4"));
+        assert!(result.stopped_at_known);
+        assert_eq!(result.total_fetched, 2);
+    }
+
+    #[tokio::test]
+    async fn fetch_all_pages_respects_initial_cursor() {
+        let pages = [
+            (
+                None,
+                PaginatedResult::new(
+                    vec![make_tweet("3"), make_tweet("2")],
+                    Some("c1".to_string()),
+                ),
+            ),
+            (
+                Some("c1".to_string()),
+                PaginatedResult::new(vec![make_tweet("1")], None),
+            ),
+        ];
+
+        let options = PaginationOptions::new().with_cursor("c1").with_max_pages(1);
+        let rate_limit = RateLimitConfig::none();
+
+        let result = TwitterClient::fetch_all_pages_with_rate_limit(
+            |cursor| {
+                let page = pages
+                    .iter()
+                    .find(|(c, _)| c.as_ref() == cursor.as_ref())
+                    .map(|(_, p)| p.clone())
+                    .unwrap_or_else(PaginatedResult::empty);
+                async move { Ok(page) }
+            },
+            &options,
+            &rate_limit,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].id, "1");
     }
 }
 

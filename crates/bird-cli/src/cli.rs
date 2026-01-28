@@ -7,6 +7,8 @@ use bird_storage::{
     create_storage, default_db_path, StorageConfig, SurrealDbAuth, SurrealDbConfig,
 };
 use clap::{Parser, Subcommand, ValueEnum};
+use serde::Deserialize;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -61,29 +63,33 @@ pub struct Cli {
     #[arg(long, global = true)]
     no_cache: bool,
 
+    /// Path to config file (defaults to ~/.bird/config.toml).
+    #[arg(long, global = true, env = "BIRD_CONFIG")]
+    config: Option<PathBuf>,
+
     /// Path to the database file (local SurrealDB only).
     #[arg(long, global = true, env = "BIRD_DB_PATH")]
     db_path: Option<PathBuf>,
 
-    /// Storage backend to use (surrealdb, memory).
-    #[arg(long, global = true, default_value = "surrealdb", env = "BIRD_STORAGE")]
-    storage: StorageBackend,
+    /// Storage backend to use (surrealdb, memory). Defaults to surrealdb.
+    #[arg(long, global = true, env = "BIRD_STORAGE")]
+    storage: Option<StorageBackend>,
 
     /// SurrealDB connection endpoint (e.g., ws://localhost:8000, https://cloud.surrealdb.com).
     #[arg(long, global = true, env = "BIRD_DB_URL")]
     db_url: Option<String>,
 
-    /// SurrealDB namespace.
-    #[arg(long, global = true, default_value = "bird", env = "BIRD_DB_NAMESPACE")]
-    db_namespace: String,
+    /// SurrealDB namespace (default: bird).
+    #[arg(long, global = true, env = "BIRD_DB_NAMESPACE")]
+    db_namespace: Option<String>,
 
-    /// SurrealDB database name.
-    #[arg(long, global = true, default_value = "main", env = "BIRD_DB_NAME")]
-    db_name: String,
+    /// SurrealDB database name (default: main).
+    #[arg(long, global = true, env = "BIRD_DB_NAME")]
+    db_name: Option<String>,
 
     /// SurrealDB authentication mode (root, namespace, database).
-    #[arg(long, global = true, default_value = "root", env = "BIRD_DB_AUTH")]
-    db_auth: DbAuthMode,
+    #[arg(long, global = true, env = "BIRD_DB_AUTH")]
+    db_auth: Option<DbAuthMode>,
 
     /// SurrealDB username.
     #[arg(long, global = true, env = "BIRD_DB_USER")]
@@ -98,7 +104,8 @@ pub struct Cli {
     tweet_id: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
 enum StorageBackend {
     /// SurrealDB-backed storage.
     Surrealdb,
@@ -106,11 +113,29 @@ enum StorageBackend {
     Memory,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
 enum DbAuthMode {
     Root,
     Namespace,
     Database,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct BirdConfig {
+    storage: Option<StorageConfigFile>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct StorageConfigFile {
+    backend: Option<StorageBackend>,
+    db_path: Option<PathBuf>,
+    db_url: Option<String>,
+    namespace: Option<String>,
+    database: Option<String>,
+    auth: Option<DbAuthMode>,
+    user: Option<String>,
+    pass: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -409,79 +434,69 @@ impl Cli {
         }))
     }
 
-    pub(crate) fn surrealdb_config(&self) -> anyhow::Result<SurrealDbConfig> {
-        let endpoint = self
-            .db_url
-            .clone()
-            .unwrap_or_else(|| format!("rocksdb://{}", self.db_path().display()));
-        let mut cfg = SurrealDbConfig {
-            endpoint,
-            namespace: self.db_namespace.clone(),
-            database: self.db_name.clone(),
-            auth: None,
-        };
+    fn config_path(&self) -> PathBuf {
+        self.config.clone().unwrap_or_else(default_config_path)
+    }
 
-        if self.db_user.is_some() || self.db_pass.is_some() {
-            let username = self.db_user.as_deref().ok_or_else(|| {
-                anyhow::anyhow!("--db-user is required when --db-pass is set")
-            })?;
-            let password = self.db_pass.as_deref().ok_or_else(|| {
-                anyhow::anyhow!("--db-pass is required when --db-user is set")
-            })?;
-
-            cfg.auth = Some(match self.db_auth {
-                DbAuthMode::Root => SurrealDbAuth::Root {
-                    username: username.to_string(),
-                    password: password.to_string(),
-                },
-                DbAuthMode::Namespace => SurrealDbAuth::Namespace {
-                    username: username.to_string(),
-                    password: password.to_string(),
-                },
-                DbAuthMode::Database => SurrealDbAuth::Database {
-                    username: username.to_string(),
-                    password: password.to_string(),
-                },
-            });
+    fn load_config(&self) -> anyhow::Result<BirdConfig> {
+        let path = self.config_path();
+        if !path.exists() {
+            if self.config.is_some() {
+                anyhow::bail!("Config file not found: {}", path.display());
+            }
+            return Ok(BirdConfig::default());
         }
 
-        Ok(cfg)
+        let contents = fs::read_to_string(&path)
+            .map_err(|e| anyhow::anyhow!("Failed to read config file {}: {}", path.display(), e))?;
+        toml::from_str(&contents)
+            .map_err(|e| anyhow::anyhow!("Failed to parse config file {}: {}", path.display(), e))
     }
 
-    pub(crate) fn uses_surrealdb(&self) -> bool {
-        matches!(self.storage, StorageBackend::Surrealdb)
-    }
+    pub(crate) fn storage_config(&self) -> anyhow::Result<StorageConfig> {
+        let config = self.load_config()?;
+        let storage_cfg = config.storage.unwrap_or_default();
+        let backend = self
+            .storage
+            .or(storage_cfg.backend)
+            .unwrap_or(StorageBackend::Surrealdb);
 
-    /// Get the database path.
-    pub fn db_path(&self) -> PathBuf {
-        self.db_path.clone().unwrap_or_else(default_db_path)
-    }
-
-    /// Create a storage instance.
-    pub async fn create_storage(&self) -> anyhow::Result<Arc<dyn bird_storage::Storage>> {
-        let config = match self.storage {
-            StorageBackend::Memory => StorageConfig::Memory,
+        match backend {
+            StorageBackend::Memory => Ok(StorageConfig::Memory),
             StorageBackend::Surrealdb => {
-                let endpoint = self
-                    .db_url
+                let db_url = self.db_url.clone().or(storage_cfg.db_url);
+                let db_path = self
+                    .db_path
                     .clone()
-                    .unwrap_or_else(|| format!("rocksdb://{}", self.db_path().display()));
-                let mut cfg = SurrealDbConfig {
-                    endpoint,
-                    namespace: self.db_namespace.clone(),
-                    database: self.db_name.clone(),
-                    auth: None,
-                };
+                    .or(storage_cfg.db_path)
+                    .unwrap_or_else(default_db_path);
+                let endpoint = db_url.unwrap_or_else(|| format!("rocksdb://{}", db_path.display()));
+                let namespace = self
+                    .db_namespace
+                    .clone()
+                    .or(storage_cfg.namespace)
+                    .unwrap_or_else(|| "bird".to_string());
+                let database = self
+                    .db_name
+                    .clone()
+                    .or(storage_cfg.database)
+                    .unwrap_or_else(|| "main".to_string());
+                let auth_mode = self
+                    .db_auth
+                    .or(storage_cfg.auth)
+                    .unwrap_or(DbAuthMode::Root);
+                let db_user = self.db_user.clone().or(storage_cfg.user);
+                let db_pass = self.db_pass.clone().or(storage_cfg.pass);
 
-                if self.db_user.is_some() || self.db_pass.is_some() {
-                    let username = self.db_user.as_deref().ok_or_else(|| {
+                let auth = if db_user.is_some() || db_pass.is_some() {
+                    let username = db_user.as_deref().ok_or_else(|| {
                         anyhow::anyhow!("--db-user is required when --db-pass is set")
                     })?;
-                    let password = self.db_pass.as_deref().ok_or_else(|| {
+                    let password = db_pass.as_deref().ok_or_else(|| {
                         anyhow::anyhow!("--db-pass is required when --db-user is set")
                     })?;
 
-                    cfg.auth = Some(match self.db_auth {
+                    Some(match auth_mode {
                         DbAuthMode::Root => SurrealDbAuth::Root {
                             username: username.to_string(),
                             password: password.to_string(),
@@ -494,12 +509,29 @@ impl Cli {
                             username: username.to_string(),
                             password: password.to_string(),
                         },
-                    });
-                }
+                    })
+                } else {
+                    None
+                };
 
-                StorageConfig::SurrealDb(cfg)
+                Ok(StorageConfig::SurrealDb(SurrealDbConfig {
+                    endpoint,
+                    namespace,
+                    database,
+                    auth,
+                }))
             }
-        };
+        }
+    }
+
+    /// Get the database path.
+    pub fn db_path(&self) -> PathBuf {
+        self.db_path.clone().unwrap_or_else(default_db_path)
+    }
+
+    /// Create a storage instance.
+    pub async fn create_storage(&self) -> anyhow::Result<Arc<dyn bird_storage::Storage>> {
+        let config = self.storage_config()?;
 
         create_storage(&config)
             .await
@@ -515,6 +547,13 @@ impl Cli {
     pub fn no_cache(&self) -> bool {
         self.no_cache
     }
+}
+
+fn default_config_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".bird")
+        .join("config.toml")
 }
 
 /// Extract a tweet ID from a URL or return the ID directly.

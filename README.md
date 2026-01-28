@@ -98,6 +98,24 @@ For testing, you can use in-memory storage:
 bird --storage memory sync likes
 ```
 
+## Config File
+
+Bird will load `~/.bird/config.toml` if present (override with `--config` or
+`BIRD_CONFIG`). CLI flags and environment variables take precedence. Example:
+
+```toml
+[storage]
+backend = "surrealdb"
+db_url = "wss://cloud.surrealdb.com"
+namespace = "bird"
+database = "main"
+auth = "root"
+user = "your_user"
+pass = "your_pass"
+```
+
+For local storage, you can set `db_path` instead of `db_url`.
+
 ## Migrations
 
 If you upgraded from a version without `created_at_ts`, run:

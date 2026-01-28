@@ -33,6 +33,9 @@ bird sync likes
 | `bird whoami`         | Show logged-in account        |
 | `bird likes`          | Fetch your liked tweets       |
 | `bird bookmarks`      | Fetch your bookmarks          |
+| `bird list likes`     | List synced likes from DB     |
+| `bird list bookmarks` | List synced bookmarks from DB |
+| `bird list user_tweets` | List synced posts from DB   |
 | `bird sync likes`     | Sync likes to local DB        |
 | `bird sync bookmarks` | Sync bookmarks to local DB    |
 | `bird sync posts`     | Sync your own tweets to DB    |

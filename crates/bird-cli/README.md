@@ -45,6 +45,17 @@ bird sync status               # Show progress
 bird sync reset likes          # Clear sync state
 ```
 
+### Listing Synced Tweets
+
+```bash
+bird list likes                # List synced likes (default)
+bird list bookmarks            # List synced bookmarks
+bird list user_tweets          # List synced posts
+bird list likes --page 2       # Pagination
+bird list likes --page-size 50 # Custom page size
+bird list likes --json         # JSON output
+```
+
 ## Options
 
 | Flag          | Description                     |

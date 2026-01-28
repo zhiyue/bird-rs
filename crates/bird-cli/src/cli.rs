@@ -116,7 +116,7 @@ enum Commands {
 
     /// List tweets from the local database.
     List {
-        /// Collection to list (likes, bookmarks).
+        /// Collection to list (likes, bookmarks, user_tweets).
         #[arg(default_value = "likes")]
         collection: String,
 

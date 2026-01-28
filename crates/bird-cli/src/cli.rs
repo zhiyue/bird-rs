@@ -1,6 +1,6 @@
 //! CLI interface for bird.
 
-use crate::commands::{bookmarks, likes, read, sync, whoami};
+use crate::commands::{bookmarks, likes, list, read, sync, whoami};
 use bird_client::cookies::{check_available_sources, resolve_credentials};
 use bird_client::{Collection, TwitterClient, TwitterClientOptions};
 use bird_storage::{default_db_path, SurrealDbStorage};
@@ -114,6 +114,21 @@ enum Commands {
         cursor: Option<String>,
     },
 
+    /// List tweets from the local database.
+    List {
+        /// Collection to list (likes, bookmarks).
+        #[arg(default_value = "likes")]
+        collection: String,
+
+        /// Page number (1-indexed).
+        #[arg(long, default_value = "1")]
+        page: u32,
+
+        /// Number of tweets per page.
+        #[arg(long)]
+        page_size: Option<u32>,
+    },
+
     /// Sync tweets to local database.
     Sync {
         #[command(subcommand)]
@@ -208,6 +223,11 @@ impl Cli {
                 max_pages,
                 cursor,
             }) => bookmarks::run(&self, *all, *max_pages, cursor.clone(), show_emoji).await,
+            Some(Commands::List {
+                collection,
+                page,
+                page_size,
+            }) => list::run(&self, collection, *page, *page_size, show_emoji).await,
             Some(Commands::Sync { action }) => match action {
                 SyncAction::Likes {
                     full,

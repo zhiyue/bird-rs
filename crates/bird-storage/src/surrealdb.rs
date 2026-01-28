@@ -13,10 +13,10 @@ pub struct SurrealDbStorage {
     db: Surreal<Db>,
 }
 
-/// Tweet record for SurrealDB storage.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct TweetRecord {
-    id: String,
+/// Tweet record for SurrealDB storage (for writing - without id since SurrealDB manages it).
+#[derive(Debug, Clone, Serialize)]
+struct TweetRecordContent {
+    tweet_id: String, // Store the tweet ID as a field for querying
     author_id: Option<String>,
     author_username: String,
     author_name: String,
@@ -34,11 +34,34 @@ struct TweetRecord {
     updated_at: DateTime<Utc>,
 }
 
-impl From<&TweetData> for TweetRecord {
+/// Tweet record for SurrealDB storage (for reading - includes the tweet_id field).
+#[derive(Debug, Clone, Deserialize)]
+struct TweetRecord {
+    tweet_id: String,
+    author_id: Option<String>,
+    author_username: String,
+    author_name: String,
+    text: String,
+    created_at: Option<String>,
+    reply_count: Option<u64>,
+    retweet_count: Option<u64>,
+    like_count: Option<u64>,
+    conversation_id: Option<String>,
+    in_reply_to_status_id: Option<String>,
+    media: Option<serde_json::Value>,
+    article: Option<serde_json::Value>,
+    quoted_tweet: Option<serde_json::Value>,
+    #[allow(dead_code)]
+    fetched_at: DateTime<Utc>,
+    #[allow(dead_code)]
+    updated_at: DateTime<Utc>,
+}
+
+impl From<&TweetData> for TweetRecordContent {
     fn from(tweet: &TweetData) -> Self {
         let now = Utc::now();
         Self {
-            id: tweet.id.clone(),
+            tweet_id: tweet.id.clone(),
             author_id: tweet.author_id.clone(),
             author_username: tweet.author.username.clone(),
             author_name: tweet.author.name.clone(),
@@ -63,7 +86,7 @@ impl TryFrom<TweetRecord> for TweetData {
 
     fn try_from(record: TweetRecord) -> Result<Self> {
         Ok(TweetData {
-            id: record.id,
+            id: record.tweet_id,
             text: record.text,
             author: TweetAuthor {
                 username: record.author_username,
@@ -91,15 +114,6 @@ impl TryFrom<TweetRecord> for TweetData {
             _raw: None,
         })
     }
-}
-
-/// Tweet collection membership record.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct TweetCollectionRecord {
-    tweet_id: String,
-    collection: String,
-    user_id: String,
-    added_at: DateTime<Utc>,
 }
 
 /// Sync state record for SurrealDB.
@@ -215,14 +229,18 @@ impl SurrealDbStorage {
 #[async_trait]
 impl TweetStore for SurrealDbStorage {
     async fn upsert_tweet(&self, tweet: &TweetData) -> Result<()> {
-        let record = TweetRecord::from(tweet);
-        let id = tweet.id.clone();
+        let content = TweetRecordContent::from(tweet);
+        let id = &tweet.id;
 
-        // Use UPSERT with the tweet ID as the record ID
+        // Convert to JSON Value first to avoid SurrealDB serialization issues
+        let json_content = serde_json::to_value(&content)
+            .map_err(|e| Error::Storage(format!("Failed to serialize tweet: {}", e)))?;
+
+        // Build query with record ID in the query string (cannot be parameterized)
+        let query = format!("UPSERT tweet:⟨{}⟩ CONTENT $content", id);
         self.db
-            .query("UPSERT tweet CONTENT $record WHERE id = $id")
-            .bind(("record", record))
-            .bind(("id", id))
+            .query(&query)
+            .bind(("content", json_content))
             .await
             .map_err(|e| Error::Storage(format!("Failed to upsert tweet: {}", e)))?;
 
@@ -245,10 +263,10 @@ impl TweetStore for SurrealDbStorage {
     }
 
     async fn get_tweet(&self, id: &str) -> Result<Option<TweetData>> {
-        let id_owned = id.to_string();
+        // Query using the record ID syntax
+        let query = format!("SELECT * FROM tweet:⟨{}⟩", id);
         let mut result = self.db
-            .query("SELECT * FROM tweet WHERE id = $id LIMIT 1")
-            .bind(("id", id_owned))
+            .query(&query)
             .await
             .map_err(|e| Error::Storage(format!("Failed to get tweet: {}", e)))?;
 
@@ -263,10 +281,10 @@ impl TweetStore for SurrealDbStorage {
     }
 
     async fn tweet_exists(&self, id: &str) -> Result<bool> {
-        let id_owned = id.to_string();
+        // Query using the record ID syntax
+        let query = format!("SELECT tweet_id FROM tweet:⟨{}⟩", id);
         let mut result = self.db
-            .query("SELECT id FROM tweet WHERE id = $id LIMIT 1")
-            .bind(("id", id_owned))
+            .query(&query)
             .await
             .map_err(|e| Error::Storage(format!("Failed to check tweet: {}", e)))?;
 
@@ -281,21 +299,22 @@ impl TweetStore for SurrealDbStorage {
             return Ok(Vec::new());
         }
 
-        let ids_vec: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
+        // Build record ID references for SurrealDB (tweet:id format)
+        let record_refs: Vec<String> = ids.iter().map(|id| format!("tweet:⟨{}⟩", id)).collect();
+        let query = format!("SELECT tweet_id FROM [{}]", record_refs.join(", "));
 
         let mut result = self.db
-            .query("SELECT id FROM tweet WHERE id IN $ids")
-            .bind(("ids", ids_vec))
+            .query(&query)
             .await
             .map_err(|e| Error::Storage(format!("Failed to filter ids: {}", e)))?;
 
         #[derive(Deserialize)]
-        struct IdRecord { id: String }
+        struct IdRecord { tweet_id: String }
 
         let records: Vec<IdRecord> = result.take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse ids: {}", e)))?;
 
-        Ok(records.into_iter().map(|r| r.id).collect())
+        Ok(records.into_iter().map(|r| r.tweet_id).collect())
     }
 
     async fn get_tweets_by_collection(
@@ -310,26 +329,59 @@ impl TweetStore for SurrealDbStorage {
         let collection_owned = collection.to_string();
         let user_id_owned = user_id.to_string();
 
-        let mut result = self.db
+        // First get ALL tweet IDs from the collection (no pagination here)
+        let mut coll_result = self.db
             .query(
-                "SELECT tweet.* FROM tweet_collection
-                 JOIN tweet ON tweet_collection.tweet_id = tweet.id
-                 WHERE tweet_collection.collection = $collection
-                 AND tweet_collection.user_id = $user_id
-                 ORDER BY tweet_collection.added_at DESC
-                 LIMIT $limit START $offset"
+                "SELECT tweet_id FROM tweet_collection
+                 WHERE collection = $collection AND user_id = $user_id"
             )
             .bind(("collection", collection_owned))
             .bind(("user_id", user_id_owned))
-            .bind(("limit", limit))
-            .bind(("offset", offset))
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get collection: {}", e)))?;
+
+        #[derive(Deserialize)]
+        struct CollectionRecord {
+            tweet_id: String,
+        }
+
+        let coll_records: Vec<CollectionRecord> = coll_result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse collection: {}", e)))?;
+
+        if coll_records.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Collect tweet IDs
+        let tweet_ids: Vec<String> = coll_records.iter().map(|r| r.tweet_id.clone()).collect();
+
+        // Fetch tweets using SurrealDB record ID syntax, sorted by created_at DESC
+        // Build array of record references: [tweet:id1, tweet:id2, ...]
+        let record_refs: Vec<String> = tweet_ids.iter().map(|id| format!("tweet:⟨{}⟩", id)).collect();
+        let query = format!(
+            "SELECT * FROM [{}] ORDER BY created_at DESC LIMIT {} START {}",
+            record_refs.join(", "),
+            limit,
+            offset
+        );
+
+        let mut tweet_result = self.db
+            .query(&query)
             .await
             .map_err(|e| Error::Storage(format!("Failed to get tweets: {}", e)))?;
 
-        let records: Vec<TweetRecord> = result.take(0)
+        let records: Vec<TweetRecord> = tweet_result
+            .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse tweets: {}", e)))?;
 
-        records.into_iter().map(|r| r.try_into()).collect()
+        // Convert to TweetData (already sorted by query)
+        let ordered_tweets: Vec<TweetData> = records
+            .into_iter()
+            .filter_map(|r| r.try_into().ok())
+            .collect();
+
+        Ok(ordered_tweets)
     }
 
     async fn add_to_collection(
@@ -338,21 +390,47 @@ impl TweetStore for SurrealDbStorage {
         collection: &str,
         user_id: &str,
     ) -> Result<()> {
-        let record = TweetCollectionRecord {
-            tweet_id: tweet_id.to_string(),
-            collection: collection.to_string(),
-            user_id: user_id.to_string(),
-            added_at: Utc::now(),
-        };
+        let tweet_id_owned = tweet_id.to_string();
+        let collection_owned = collection.to_string();
+        let user_id_owned = user_id.to_string();
+        let now = Utc::now();
 
-        self.db
-            .query(
-                "INSERT INTO tweet_collection $record
-                 ON DUPLICATE KEY UPDATE added_at = $record.added_at"
-            )
-            .bind(("record", record))
-            .await
-            .map_err(|e| Error::Storage(format!("Failed to add to collection: {}", e)))?;
+        // Check if already exists
+        let exists = self
+            .is_in_collection(tweet_id, collection, user_id)
+            .await?;
+
+        if exists {
+            // Update existing record
+            self.db
+                .query(
+                    "UPDATE tweet_collection SET added_at = $added_at
+                     WHERE tweet_id = $tweet_id AND collection = $collection AND user_id = $user_id"
+                )
+                .bind(("tweet_id", tweet_id_owned))
+                .bind(("collection", collection_owned))
+                .bind(("user_id", user_id_owned))
+                .bind(("added_at", now))
+                .await
+                .map_err(|e| Error::Storage(format!("Failed to update collection: {}", e)))?;
+        } else {
+            // Insert new record using CREATE (SurrealDB 2.x preferred method)
+            self.db
+                .query(
+                    "CREATE tweet_collection CONTENT {
+                        tweet_id: $tweet_id,
+                        collection: $collection,
+                        user_id: $user_id,
+                        added_at: $added_at
+                    }"
+                )
+                .bind(("tweet_id", tweet_id_owned))
+                .bind(("collection", collection_owned))
+                .bind(("user_id", user_id_owned))
+                .bind(("added_at", now))
+                .await
+                .map_err(|e| Error::Storage(format!("Failed to add to collection: {}", e)))?;
+        }
 
         Ok(())
     }

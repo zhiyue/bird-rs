@@ -9,13 +9,17 @@ impl TwitterClient {
     /// Fetch a tweet by ID.
     pub(crate) async fn get_tweet_detail(&self, tweet_id: &str) -> Result<TweetData> {
         let variables = json!({
-            "tweetId": tweet_id,
-            "withCommunity": false,
-            "includePromotedContent": false,
-            "withVoice": false
+            "focalTweetId": tweet_id,
+            "with_rux_injections": false,
+            "rankingMode": "Relevance",
+            "includePromotedContent": true,
+            "withCommunity": true,
+            "withQuickPromoteEligibilityTweetFields": true,
+            "withBirdwatchNotes": true,
+            "withVoice": true
         });
 
-        let url = self.build_graphql_url(Operation::TweetDetail, &variables);
+        let url = self.build_graphql_url_with_field_toggles(Operation::TweetDetail, &variables);
         let headers = self.get_headers();
 
         let response = self.http_client.get(&url).headers(headers).send().await
@@ -54,16 +58,48 @@ impl TwitterClient {
 
 /// Parse a tweet from the GraphQL response.
 fn parse_tweet_from_response(json: &Value, tweet_id: &str, quote_depth: u32) -> Result<TweetData> {
-    // Navigate to the tweet result
-    let tweet_result = json
-        .pointer("/data/tweetResult/result")
-        .or_else(|| {
-            // Alternative path for some responses
-            json.pointer("/data/tweet/result")
-        })
-        .ok_or_else(|| Error::TweetNotFound(tweet_id.to_string()))?;
+    // Try direct tweetResult path first
+    if let Some(tweet_result) = json.pointer("/data/tweetResult/result") {
+        return parse_tweet_result(tweet_result, quote_depth, 0);
+    }
 
-    parse_tweet_result(tweet_result, quote_depth, 0)
+    // Try threaded_conversation_with_injections_v2 path
+    if let Some(instructions) = json
+        .pointer("/data/threaded_conversation_with_injections_v2/instructions")
+        .and_then(|v| v.as_array())
+    {
+        // Find the tweet in the instructions
+        for instruction in instructions {
+            if let Some(entries) = instruction.get("entries").and_then(|e| e.as_array()) {
+                for entry in entries {
+                    let entry_id = entry
+                        .get("entryId")
+                        .and_then(|e| e.as_str())
+                        .unwrap_or("");
+
+                    // Look for the focal tweet entry
+                    if entry_id.starts_with("tweet-") || entry_id.contains(tweet_id) {
+                        if let Some(tweet_result) =
+                            entry.pointer("/content/itemContent/tweet_results/result")
+                        {
+                            // Check if this is the tweet we're looking for
+                            let result_id = tweet_result.get("rest_id").and_then(|v| v.as_str());
+                            if result_id == Some(tweet_id) {
+                                return parse_tweet_result(tweet_result, quote_depth, 0);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Try alternative path
+    if let Some(tweet_result) = json.pointer("/data/tweet/result") {
+        return parse_tweet_result(tweet_result, quote_depth, 0);
+    }
+
+    Err(Error::TweetNotFound(tweet_id.to_string()))
 }
 
 /// Parse a tweet result object.

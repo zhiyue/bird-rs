@@ -173,58 +173,125 @@ impl TwitterClient {
         )
     }
 
+    /// Build a GraphQL URL with field toggles for operations that require them.
+    pub(crate) fn build_graphql_url_with_field_toggles(
+        &self,
+        operation: Operation,
+        variables: &serde_json::Value,
+    ) -> String {
+        let query_id = operation.default_query_id();
+        let features_json = serde_json::to_string(&features::tweet_detail_features()).unwrap();
+        let variables_json = serde_json::to_string(variables).unwrap();
+        let field_toggles = serde_json::json!({
+            "withArticlePlainText": true,
+            "withArticleRichContentState": true
+        });
+        let field_toggles_json = serde_json::to_string(&field_toggles).unwrap();
+
+        format!(
+            "{}/{}/{}?variables={}&features={}&fieldToggles={}",
+            TWITTER_API_BASE,
+            query_id,
+            operation.name(),
+            urlencoding::encode(&variables_json),
+            urlencoding::encode(&features_json),
+            urlencoding::encode(&field_toggles_json)
+        )
+    }
+
     /// Get the current authenticated user.
+    /// Tries multiple endpoints in order until one succeeds.
+    /// Falls back to extracting user ID from cookie if all endpoints fail.
     pub async fn get_current_user(&mut self) -> CurrentUserResult {
-        // Use the settings endpoint to get current user info
-        let url = "https://x.com/i/api/1.1/account/settings.json";
+        // Try multiple endpoints like the upstream TypeScript bird project
+        let candidate_urls = [
+            "https://x.com/i/api/account/settings.json",
+            "https://api.twitter.com/1.1/account/settings.json",
+            "https://x.com/i/api/account/verify_credentials.json?skip_status=true&include_entities=false",
+            "https://api.twitter.com/1.1/account/verify_credentials.json?skip_status=true&include_entities=false",
+        ];
 
-        let response = match self
-            .http_client
-            .get(url)
-            .headers(self.get_headers())
-            .send()
-            .await
-        {
-            Ok(resp) => resp,
-            Err(e) => return CurrentUserResult::Error(e.to_string()),
-        };
-
-        if !response.status().is_success() {
-            return CurrentUserResult::Error(format!("HTTP {}", response.status()));
-        }
-
-        let text = match response.text().await {
-            Ok(t) => t,
-            Err(e) => return CurrentUserResult::Error(e.to_string()),
-        };
-
-        // Parse screen_name from response
         let screen_name_regex = regex::Regex::new(r#""screen_name":"([^"]+)""#).unwrap();
         let user_id_regex = regex::Regex::new(r#""user_id"\s*:\s*"(\d+)""#).unwrap();
+        let user_id_str_regex = regex::Regex::new(r#""user_id_str"\s*:\s*"(\d+)""#).unwrap();
+        let id_str_regex = regex::Regex::new(r#""id_str"\s*:\s*"(\d+)""#).unwrap();
         let name_regex = regex::Regex::new(r#""name":"([^"\\]*(?:\\.[^"\\]*)*)""#).unwrap();
 
-        let username = screen_name_regex
-            .captures(&text)
-            .and_then(|c| c.get(1))
-            .map(|m| m.as_str().to_string());
+        let mut last_error = String::new();
 
-        let id = user_id_regex
-            .captures(&text)
-            .and_then(|c| c.get(1))
-            .map(|m| m.as_str().to_string());
+        for url in candidate_urls {
+            let response = match self
+                .http_client
+                .get(url)
+                .headers(self.get_headers())
+                .send()
+                .await
+            {
+                Ok(resp) => resp,
+                Err(e) => {
+                    last_error = e.to_string();
+                    continue;
+                }
+            };
 
-        let name = name_regex
-            .captures(&text)
-            .and_then(|c| c.get(1))
-            .map(|m| m.as_str().to_string());
-
-        match (id, username, name) {
-            (Some(id), Some(username), Some(name)) => {
-                self.client_user_id = Some(id.clone());
-                CurrentUserResult::Success(CurrentUser { id, username, name })
+            if !response.status().is_success() {
+                last_error = format!("HTTP {}", response.status());
+                continue;
             }
-            _ => CurrentUserResult::Error("Failed to parse user info from response".to_string()),
+
+            let text = match response.text().await {
+                Ok(t) => t,
+                Err(e) => {
+                    last_error = e.to_string();
+                    continue;
+                }
+            };
+
+            let username = screen_name_regex
+                .captures(&text)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str().to_string());
+
+            // Try multiple patterns for user ID
+            let id = user_id_regex
+                .captures(&text)
+                .or_else(|| user_id_str_regex.captures(&text))
+                .or_else(|| id_str_regex.captures(&text))
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str().to_string());
+
+            let name = name_regex
+                .captures(&text)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str().to_string());
+
+            if let (Some(id), Some(username)) = (id, username) {
+                self.client_user_id = Some(id.clone());
+                return CurrentUserResult::Success(CurrentUser {
+                    id,
+                    username: username.clone(),
+                    name: name.unwrap_or(username),
+                });
+            }
+
+            last_error = "Failed to parse user info from response".to_string();
         }
+
+        // Fallback: Try to extract user ID from twid cookie (format: u%3D{user_id} or u={user_id})
+        // This allows likes/bookmarks to work even if account settings endpoint fails
+        let twid_regex = regex::Regex::new(r"twid=u(?:%3D|=)(\d+)").unwrap();
+        if let Some(captures) = twid_regex.captures(&self.cookie_header) {
+            if let Some(user_id) = captures.get(1).map(|m| m.as_str().to_string()) {
+                self.client_user_id = Some(user_id.clone());
+                return CurrentUserResult::Success(CurrentUser {
+                    id: user_id,
+                    username: "unknown".to_string(),
+                    name: "Unknown User".to_string(),
+                });
+            }
+        }
+
+        CurrentUserResult::Error(last_error)
     }
 
     /// Get the current user ID (must call get_current_user first).

@@ -1,7 +1,7 @@
 //! Likes fetching with pagination.
 
 use crate::client::TwitterClient;
-use crate::constants::{Operation, DEFAULT_PAGE_COUNT};
+use crate::constants::{features, Operation, DEFAULT_PAGE_COUNT, TWITTER_API_BASE};
 use crate::operations::parse_timeline_entries;
 use bird_core::{Error, PaginatedResult, PaginationOptions, Result, TweetData};
 use serde_json::json;
@@ -27,7 +27,20 @@ impl TwitterClient {
             variables["cursor"] = json!(cursor);
         }
 
-        let url = self.build_graphql_url(Operation::Likes, &variables);
+        // Use likes-specific features
+        let query_id = Operation::Likes.default_query_id();
+        let features_json = serde_json::to_string(&features::likes_features()).unwrap();
+        let variables_json = serde_json::to_string(&variables).unwrap();
+
+        let url = format!(
+            "{}/{}/{}?variables={}&features={}",
+            TWITTER_API_BASE,
+            query_id,
+            Operation::Likes.name(),
+            urlencoding::encode(&variables_json),
+            urlencoding::encode(&features_json)
+        );
+
         let headers = self.get_headers();
 
         let response = self.http_client.get(&url).headers(headers).send().await
@@ -55,13 +68,17 @@ impl TwitterClient {
             }
         }
 
-        // Parse the response
-        let entries = json
-            .pointer("/data/user/result/timeline_v2/timeline/instructions")
-            .and_then(|instructions| instructions.as_array())
+        // Parse the response - try multiple paths as API response structure varies
+        let instructions = json
+            .pointer("/data/user/result/timeline/timeline/instructions")
+            .or_else(|| json.pointer("/data/user/result/timeline_v2/timeline/instructions"))
+            .and_then(|i| i.as_array());
+
+        let entries = instructions
             .and_then(|instructions| {
                 instructions.iter().find_map(|inst| {
-                    if inst.get("type").and_then(|t| t.as_str()) == Some("TimelineAddEntries") {
+                    let inst_type = inst.get("type").and_then(|t| t.as_str());
+                    if inst_type == Some("TimelineAddEntries") {
                         inst.get("entries").and_then(|e| e.as_array())
                     } else {
                         None

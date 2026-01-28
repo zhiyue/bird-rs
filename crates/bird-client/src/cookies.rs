@@ -23,6 +23,19 @@ impl TwitterCookies {
             cookie_header,
         }
     }
+
+    /// Create new Twitter cookies with optional twid cookie for user ID extraction.
+    pub fn new_with_twid(auth_token: String, ct0: String, twid: Option<String>) -> Self {
+        let cookie_header = match twid {
+            Some(ref tw) => format!("auth_token={}; ct0={}; twid={}", auth_token, ct0, tw),
+            None => format!("auth_token={}; ct0={}", auth_token, ct0),
+        };
+        Self {
+            auth_token,
+            ct0,
+            cookie_header,
+        }
+    }
 }
 
 /// Resolve Twitter credentials from various sources.
@@ -71,25 +84,28 @@ pub fn resolve_credentials(
 fn extract_from_safari() -> Result<TwitterCookies> {
     use sweet_cookie::{get_cookies, GetCookiesOptions};
 
-    let options = GetCookiesOptions::new("https://x.com").with_names(["auth_token", "ct0"]);
+    let options =
+        GetCookiesOptions::new("https://x.com").with_names(["auth_token", "ct0", "twid"]);
 
     let result =
         get_cookies(&options).map_err(|e| Error::CookieExtraction(format!("Safari: {}", e)))?;
 
     // Also try twitter.com domain
     let twitter_options =
-        GetCookiesOptions::new("https://twitter.com").with_names(["auth_token", "ct0"]);
+        GetCookiesOptions::new("https://twitter.com").with_names(["auth_token", "ct0", "twid"]);
 
     let twitter_result = get_cookies(&twitter_options).ok();
 
     // Merge cookies from both domains
     let mut auth_token: Option<String> = None;
     let mut ct0: Option<String> = None;
+    let mut twid: Option<String> = None;
 
     for cookie in result.cookies.iter() {
         match cookie.name.as_str() {
             "auth_token" if auth_token.is_none() => auth_token = Some(cookie.value.clone()),
             "ct0" if ct0.is_none() => ct0 = Some(cookie.value.clone()),
+            "twid" if twid.is_none() => twid = Some(cookie.value.clone()),
             _ => {}
         }
     }
@@ -99,13 +115,14 @@ fn extract_from_safari() -> Result<TwitterCookies> {
             match cookie.name.as_str() {
                 "auth_token" if auth_token.is_none() => auth_token = Some(cookie.value.clone()),
                 "ct0" if ct0.is_none() => ct0 = Some(cookie.value.clone()),
+                "twid" if twid.is_none() => twid = Some(cookie.value.clone()),
                 _ => {}
             }
         }
     }
 
     match (auth_token, ct0) {
-        (Some(auth), Some(csrf)) => Ok(TwitterCookies::new(auth, csrf)),
+        (Some(auth), Some(csrf)) => Ok(TwitterCookies::new_with_twid(auth, csrf, twid)),
         (Some(_), None) => Err(Error::CookieExtraction(
             "Found auth_token but ct0 is missing".to_string(),
         )),

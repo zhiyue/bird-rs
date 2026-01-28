@@ -61,10 +61,11 @@ pub enum Operation {
 
 impl Operation {
     /// Get the default/fallback query ID for this operation.
+    /// Note: These IDs are synced from the upstream bird project's query-ids.json
     pub fn default_query_id(&self) -> &'static str {
         match self {
-            Operation::CreateTweet => "TAJw1rBsjAtdNgTdlo2oeg",
-            Operation::CreateRetweet => "ojPdsZsimiJrUGLR1sjUtA",
+            Operation::CreateTweet => "nmdAQXJDxw6-0KKF2on7eA",
+            Operation::CreateRetweet => "LFho5rIi4xcKO90p9jwG7A",
             Operation::DeleteRetweet => "iQtK4dl5hBmXewYZuEOKVw",
             Operation::CreateFriendship => "8h9JVdV8dlSyqyRDJEPCsA",
             Operation::DestroyFriendship => "ppXWuagMNXgvzx6WoXBW0Q",
@@ -72,14 +73,14 @@ impl Operation {
             Operation::UnfavoriteTweet => "ZYKSe-w7KEslx3JhSIk5LA",
             Operation::CreateBookmark => "aoDbu3RHznuiSkQ9aNM67Q",
             Operation::DeleteBookmark => "Wlmlj2-xzyS1GN3a6cj-mQ",
-            Operation::TweetDetail => "97JF30KziU00483E_8elBA",
-            Operation::SearchTimeline => "M1jEez78PEfVfbQLvlWMvQ",
+            Operation::TweetDetail => "_NvJCnIjOW__EP5-RF197A",
+            Operation::SearchTimeline => "6AAys3t42mosm_yTI_QENg",
             Operation::UserArticlesTweets => "8zBy9h4L90aDL02RsBcCFg",
             Operation::UserTweets => "Wms1GvIiHXAPBaCr9KblaA",
             Operation::Bookmarks => "RV1g3b8n_SGOHwkqKYSCFw",
-            Operation::Following => "BEkNpEt5pNETESoqMsTEGA",
-            Operation::Followers => "kuFUYP9eV1FPoEy4N-pi7w",
-            Operation::Likes => "JR2gceKucIKcVNB_9JkhsA",
+            Operation::Following => "mWYeougg_ocJS2Vr1Vt28w",
+            Operation::Followers => "SFYY3WsgwjlXSLlfnEUE4A",
+            Operation::Likes => "ETJflBunfqNa1uE1mBPCaw",
             Operation::BookmarkFolderTimeline => "KJIQpsvxrTfRIlbaRIySHQ",
             Operation::ListOwnerships => "wQcOSjSQ8NtgxIwvYl1lMg",
             Operation::ListMemberships => "BlEXXdARdSeL_0KyKHHvvg",
@@ -133,12 +134,17 @@ impl Operation {
     /// Get fallback query IDs for operations that have multiple known IDs.
     pub fn fallback_query_ids(&self) -> &[&'static str] {
         match self {
-            Operation::TweetDetail => &["97JF30KziU00483E_8elBA", "aFvUsJm2c-oDkJV75blV6g"],
+            Operation::TweetDetail => &[
+                "_NvJCnIjOW__EP5-RF197A",
+                "97JF30KziU00483E_8elBA",
+                "aFvUsJm2c-oDkJV75blV6g",
+            ],
             Operation::SearchTimeline => &[
+                "6AAys3t42mosm_yTI_QENg",
                 "M1jEez78PEfVfbQLvlWMvQ",
                 "5h0kNbk3ii97rmfY6CdgAA",
-                "Tp1sewRU1AsZpBWhqCZicQ",
             ],
+            Operation::Likes => &["ETJflBunfqNa1uE1mBPCaw", "JR2gceKucIKcVNB_9JkhsA"],
             _ => &[],
         }
     }
@@ -186,5 +192,111 @@ pub mod features {
             "responsive_web_grok_share_attachment_enabled": false,
             "responsive_web_jetfuel_frame": false
         })
+    }
+
+    /// Get feature flags for TweetDetail requests.
+    pub fn tweet_detail_features() -> Value {
+        use std::collections::HashMap;
+
+        let mut features: HashMap<&str, Value> = HashMap::new();
+        features.insert("rweb_video_screen_enabled", json!(true));
+        features.insert("profile_label_improvements_pcf_label_in_post_enabled", json!(true));
+        features.insert("responsive_web_profile_redirect_enabled", json!(true));
+        features.insert("rweb_tipjar_consumption_enabled", json!(true));
+        features.insert("verified_phone_label_enabled", json!(false));
+        features.insert("creator_subscriptions_tweet_preview_api_enabled", json!(true));
+        features.insert("responsive_web_graphql_timeline_navigation_enabled", json!(true));
+        features.insert("responsive_web_graphql_exclude_directive_enabled", json!(true));
+        features.insert("responsive_web_graphql_skip_user_profile_image_extensions_enabled", json!(false));
+        features.insert("premium_content_api_read_enabled", json!(false));
+        features.insert("communities_web_enable_tweet_community_results_fetch", json!(true));
+        features.insert("c9s_tweet_anatomy_moderator_badge_enabled", json!(true));
+        features.insert("responsive_web_grok_analyze_button_fetch_trends_enabled", json!(false));
+        features.insert("responsive_web_grok_analyze_post_followups_enabled", json!(false));
+        features.insert("responsive_web_grok_annotations_enabled", json!(false));
+        features.insert("responsive_web_jetfuel_frame", json!(true));
+        features.insert("post_ctas_fetch_enabled", json!(true));
+        features.insert("responsive_web_grok_share_attachment_enabled", json!(true));
+        features.insert("articles_preview_enabled", json!(true));
+        features.insert("responsive_web_edit_tweet_api_enabled", json!(true));
+        features.insert("graphql_is_translatable_rweb_tweet_is_translatable_enabled", json!(true));
+        features.insert("view_counts_everywhere_api_enabled", json!(true));
+        features.insert("longform_notetweets_consumption_enabled", json!(true));
+        features.insert("responsive_web_twitter_article_tweet_consumption_enabled", json!(true));
+        features.insert("tweet_awards_web_tipping_enabled", json!(false));
+        features.insert("responsive_web_grok_show_grok_translated_post", json!(false));
+        features.insert("responsive_web_grok_analysis_button_from_backend", json!(true));
+        features.insert("creator_subscriptions_quote_tweet_preview_enabled", json!(false));
+        features.insert("freedom_of_speech_not_reach_fetch_enabled", json!(true));
+        features.insert("standardized_nudges_misinfo", json!(true));
+        features.insert("tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled", json!(true));
+        features.insert("longform_notetweets_rich_text_read_enabled", json!(true));
+        features.insert("longform_notetweets_inline_media_enabled", json!(true));
+        features.insert("responsive_web_grok_image_annotation_enabled", json!(true));
+        features.insert("responsive_web_grok_imagine_annotation_enabled", json!(true));
+        features.insert("responsive_web_grok_community_note_auto_translation_is_enabled", json!(false));
+        features.insert("responsive_web_enhance_cards_enabled", json!(false));
+        features.insert("responsive_web_twitter_article_plain_text_enabled", json!(true));
+        features.insert("responsive_web_twitter_article_seed_tweet_detail_enabled", json!(true));
+        features.insert("responsive_web_twitter_article_seed_tweet_summary_enabled", json!(true));
+        features.insert("articles_rest_api_enabled", json!(true));
+        features.insert("rweb_video_timestamps_enabled", json!(true));
+
+        json!(features)
+    }
+
+    /// Get feature flags for Likes/Timeline requests.
+    pub fn likes_features() -> Value {
+        use std::collections::HashMap;
+
+        let mut features: HashMap<&str, Value> = HashMap::new();
+        features.insert("rweb_video_screen_enabled", json!(true));
+        features.insert("profile_label_improvements_pcf_label_in_post_enabled", json!(true));
+        features.insert("responsive_web_profile_redirect_enabled", json!(true));
+        features.insert("rweb_tipjar_consumption_enabled", json!(true));
+        features.insert("verified_phone_label_enabled", json!(false));
+        features.insert("creator_subscriptions_tweet_preview_api_enabled", json!(true));
+        features.insert("responsive_web_graphql_timeline_navigation_enabled", json!(true));
+        features.insert("responsive_web_graphql_exclude_directive_enabled", json!(true));
+        features.insert("responsive_web_graphql_skip_user_profile_image_extensions_enabled", json!(false));
+        features.insert("premium_content_api_read_enabled", json!(false));
+        features.insert("communities_web_enable_tweet_community_results_fetch", json!(true));
+        features.insert("c9s_tweet_anatomy_moderator_badge_enabled", json!(true));
+        features.insert("responsive_web_grok_analyze_button_fetch_trends_enabled", json!(false));
+        features.insert("responsive_web_grok_analyze_post_followups_enabled", json!(false));
+        features.insert("responsive_web_grok_annotations_enabled", json!(false));
+        features.insert("responsive_web_jetfuel_frame", json!(true));
+        features.insert("post_ctas_fetch_enabled", json!(true));
+        features.insert("responsive_web_grok_share_attachment_enabled", json!(true));
+        features.insert("articles_preview_enabled", json!(true));
+        features.insert("responsive_web_edit_tweet_api_enabled", json!(true));
+        features.insert("graphql_is_translatable_rweb_tweet_is_translatable_enabled", json!(true));
+        features.insert("view_counts_everywhere_api_enabled", json!(true));
+        features.insert("longform_notetweets_consumption_enabled", json!(true));
+        features.insert("responsive_web_twitter_article_tweet_consumption_enabled", json!(true));
+        features.insert("tweet_awards_web_tipping_enabled", json!(false));
+        features.insert("responsive_web_grok_show_grok_translated_post", json!(false));
+        features.insert("responsive_web_grok_analysis_button_from_backend", json!(true));
+        features.insert("creator_subscriptions_quote_tweet_preview_enabled", json!(false));
+        features.insert("freedom_of_speech_not_reach_fetch_enabled", json!(true));
+        features.insert("standardized_nudges_misinfo", json!(true));
+        features.insert("tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled", json!(true));
+        features.insert("rweb_video_timestamps_enabled", json!(true));
+        features.insert("longform_notetweets_rich_text_read_enabled", json!(true));
+        features.insert("longform_notetweets_inline_media_enabled", json!(true));
+        features.insert("responsive_web_grok_image_annotation_enabled", json!(true));
+        features.insert("responsive_web_grok_imagine_annotation_enabled", json!(true));
+        features.insert("responsive_web_grok_community_note_auto_translation_is_enabled", json!(false));
+        features.insert("responsive_web_enhance_cards_enabled", json!(false));
+        features.insert("blue_business_profile_image_shape_enabled", json!(true));
+        features.insert("responsive_web_text_conversations_enabled", json!(false));
+        features.insert("tweetypie_unmention_optimization_enabled", json!(true));
+        features.insert("vibe_api_enabled", json!(true));
+        features.insert("responsive_web_twitter_blue_verified_badge_is_enabled", json!(true));
+        features.insert("interactive_text_enabled", json!(true));
+        features.insert("longform_notetweets_richtext_consumption_enabled", json!(true));
+        features.insert("responsive_web_media_download_video_enabled", json!(false));
+
+        json!(features)
     }
 }

@@ -377,10 +377,30 @@ pub async fn run_status(cli: &Cli, show_emoji: bool) -> anyhow::Result<()> {
     }
 
     let icon = if show_emoji { "📊 " } else { "" };
-    println!("{}Sync status for user {}:", icon, user_id.bold());
-    println!();
+    println!("{}Sync Status for user {}", icon, user_id.bold());
+    println!("{}", "─".repeat(70));
 
-    for state in states {
+    // Summary table header
+    println!();
+    println!(
+        "  {:<14} {:>10} {:>12} {:>10} {:>12}",
+        "Collection".bold(),
+        "Synced".bold(),
+        "Backfill".bold(),
+        "Rate Lim".bold(),
+        "Last Sync".bold()
+    );
+    println!(
+        "  {:<14} {:>10} {:>12} {:>10} {:>12}",
+        "──────────────",
+        "──────────",
+        "────────────",
+        "──────────",
+        "────────────"
+    );
+
+    // Summary rows
+    for state in &states {
         let collection_icon = if show_emoji {
             match state.collection.as_str() {
                 "likes" => "❤️  ",
@@ -393,55 +413,94 @@ pub async fn run_status(cli: &Cli, show_emoji: bool) -> anyhow::Result<()> {
             ""
         };
 
+        let backfill_status = if state.has_more_history {
+            "pending".yellow().to_string()
+        } else {
+            "complete".green().to_string()
+        };
+
+        let rate_limit_status = if state.last_rate_limited_at.is_some() {
+            "yes".yellow().to_string()
+        } else {
+            "no".dimmed().to_string()
+        };
+
+        let last_sync = format_relative_time(state.last_sync_at);
+
+        println!(
+            "  {}{:<12} {:>10} {:>12} {:>10} {:>12}",
+            collection_icon,
+            state.collection,
+            state.total_synced.to_string().green(),
+            backfill_status,
+            rate_limit_status,
+            last_sync.cyan()
+        );
+    }
+
+    // Detailed info per collection
+    println!();
+    println!("{}", "─".repeat(70));
+    println!();
+    println!("  {}", "Details".bold());
+
+    for state in &states {
+        let collection_icon = if show_emoji {
+            match state.collection.as_str() {
+                "likes" => "❤️  ",
+                "bookmarks" => "🔖 ",
+                "timeline" => "🏠 ",
+                "user_tweets" => "📝 ",
+                _ => "📁 ",
+            }
+        } else {
+            ""
+        };
+
+        println!();
         println!("  {}{}", collection_icon, state.collection.bold());
-        println!("    Total synced: {}", state.total_synced);
-        println!("    Last sync: {}", format_sync_time(state.last_sync_at));
 
+        // IDs
         if let Some(ref newest_id) = state.newest_item_id {
-            println!("    Newest ID: {}", newest_id.dimmed());
+            println!("    {:<18} {}", "Newest ID:", newest_id.dimmed());
         }
-
         if let Some(ref oldest_id) = state.oldest_item_id {
-            println!("    Oldest ID: {}", oldest_id.dimmed());
+            println!("    {:<18} {}", "Oldest ID:", oldest_id.dimmed());
         }
 
-        // Show rate limit info
+        // Last sync with full timestamp
+        println!(
+            "    {:<18} {}",
+            "Last sync:",
+            format_sync_time(state.last_sync_at)
+        );
+
+        // Rate limit details
         if let Some(last_rate_limited_at) = state.last_rate_limited_at {
             let mut info = format_sync_time(last_rate_limited_at);
             if let Some(backoff_ms) = state.last_rate_limit_backoff_ms {
                 info.push_str(&format!(" · backoff {}ms", backoff_ms));
             }
             if let Some(retries) = state.last_rate_limit_retries {
-                info.push_str(&format!(" · retries {}", retries));
+                info.push_str(&format!(" · {} retries", retries));
             }
-            println!("    Rate limit: {}", info.dimmed());
-        } else {
-            println!("    Rate limit: {}", "none".dimmed());
+            println!("    {:<18} {}", "Rate limited:", info.yellow());
         }
 
-        // Show backfill status
+        // Backfill details
         if state.has_more_history {
-            let backfill_icon = if show_emoji { "📚 " } else { "" };
-            println!(
-                "    {}Backfill: {} (more history available)",
-                backfill_icon,
-                "pending".yellow()
-            );
             if let Some(ref cursor) = state.backfill_cursor {
-                let truncated = if cursor.len() > 20 {
-                    format!("{}...", &cursor[..20])
+                let truncated = if cursor.len() > 30 {
+                    format!("{}...", &cursor[..30])
                 } else {
                     cursor.clone()
                 };
-                println!("    Backfill cursor: {}", truncated.dimmed());
+                println!("    {:<18} {}", "Backfill cursor:", truncated.dimmed());
             }
-        } else {
-            let complete_icon = if show_emoji { "✅ " } else { "" };
-            println!("    {}Backfill: {}", complete_icon, "complete".green());
         }
-
-        println!();
     }
+
+    println!();
 
     Ok(())
 }

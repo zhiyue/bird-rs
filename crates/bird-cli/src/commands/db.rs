@@ -112,73 +112,106 @@ pub async fn run_status(cli: &Cli, show_emoji: bool) -> anyhow::Result<()> {
     }
 
     let icon = if show_emoji { "🗄️  " } else { "" };
-    println!("{}Database status", icon);
-    println!("  Endpoint: {}", db_config.endpoint.cyan());
-    println!("  Namespace: {}", db_config.namespace.cyan());
-    println!("  Database: {}", db_config.database.cyan());
-    println!("  Auth: {}", auth_mode.cyan());
+    println!("{}Database Status", icon);
+    println!("{}", "─".repeat(50));
+
+    // Connection info section
     println!();
-    println!("  Tweets: {}", stats.tweets.to_string().green().bold());
+    println!("  {}", "Connection".bold());
+    println!("  {:<22} {}", "Endpoint:", db_config.endpoint.cyan());
+    println!("  {:<22} {}", "Namespace:", db_config.namespace.cyan());
+    println!("  {:<22} {}", "Database:", db_config.database.cyan());
+    println!("  {:<22} {}", "Auth:", auth_mode.cyan());
+
+    // Counts section
+    println!();
+    println!("  {}", "Counts".bold());
     println!(
-        "  Collections: {}",
-        stats.collections.to_string().green().bold()
+        "  {:<22} {:>8}",
+        "Tweets:",
+        stats.tweets.to_string().green().bold()
     );
-    println!("  Likes: {}", stats.likes.to_string().green().bold());
     println!(
-        "  Bookmarks: {}",
+        "  {:<22} {:>8}",
+        "Likes:",
+        stats.likes.to_string().green().bold()
+    );
+    println!(
+        "  {:<22} {:>8}",
+        "Bookmarks:",
         stats.bookmarks.to_string().green().bold()
     );
     println!(
-        "  Sync states: {}",
+        "  {:<22} {:>8}",
+        "Collections:",
+        stats.collections.to_string().green().bold()
+    );
+    println!(
+        "  {:<22} {:>8}",
+        "Sync states:",
         stats.sync_states.to_string().green().bold()
     );
     let missing = stats.missing_created_at_ts;
     if missing > 0 {
         println!(
-            "  Missing created_at_ts: {}",
+            "  {:<22} {:>8}",
+            "Missing created_at_ts:",
             missing.to_string().yellow().bold()
         );
-    } else {
-        println!("  Missing created_at_ts: {}", "0".green().bold());
     }
+
+    // Timeline section
+    println!();
+    println!("  {}", "Timeline".bold());
     match &oldest_tweet_at {
-        Some(date) => println!("  Oldest tweet: {}", date.cyan()),
+        Some(date) => println!("  {:<22} {}", "Oldest tweet:", date.cyan()),
         None => println!(
-            "  Oldest tweet: {}",
+            "  {:<22} {}",
+            "Oldest tweet:",
             "unknown (missing created_at_ts)".yellow()
         ),
     }
     match &newest_tweet_at {
-        Some(date) => println!("  Newest tweet: {}", date.cyan()),
+        Some(date) => println!("  {:<22} {}", "Newest tweet:", date.cyan()),
         None => println!(
-            "  Newest tweet: {}",
+            "  {:<22} {}",
+            "Newest tweet:",
             "unknown (missing created_at_ts)".yellow()
         ),
     }
+
+    // Storage section
     println!();
+    println!("  {}", "Storage".bold());
     match storage_path {
         Some(path) => {
-            println!("  Storage path: {}", path.display().to_string().cyan());
+            println!(
+                "  {:<22} {}",
+                "Path:",
+                path.display().to_string().cyan()
+            );
             match storage_size_bytes {
                 Some(size) => {
                     let human = format_bytes(size);
                     println!(
-                        "  Storage size: {} ({})",
+                        "  {:<22} {} ({})",
+                        "Size:",
                         human.green().bold(),
-                        size.to_string().green()
+                        format!("{} bytes", size).dimmed()
                     );
                 }
                 None => {
                     let message = storage_error
                         .as_deref()
                         .unwrap_or("unavailable for this endpoint");
-                    println!("  Storage size: {}", message.yellow());
+                    println!("  {:<22} {}", "Size:", message.yellow());
                 }
             }
         }
         None => {
             println!(
-                "  Storage size: {}",
+                "  {:<22} {}",
+                "Size:",
                 "unavailable for remote endpoint".yellow()
             );
         }

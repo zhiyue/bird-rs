@@ -299,6 +299,18 @@ impl From<SyncStateRecord> for SyncState {
     }
 }
 
+/// Debug info about timestamps.
+#[derive(Debug)]
+pub struct TimestampDebugInfo {
+    pub none_count: u64,
+    pub zero_count: u64,
+    pub valid_count: u64,
+    pub distinct_count: u64,
+    pub min_ts: Option<i64>,
+    pub max_ts: Option<i64>,
+    pub distribution: Vec<(i64, u64)>,
+}
+
 impl SurrealDbStorage {
     /// Create a new SurrealDB storage at the default path.
     pub async fn new_default() -> Result<Self> {
@@ -437,6 +449,111 @@ impl SurrealDbStorage {
         self.init_schema().await
     }
 
+    /// Debug: Get distribution of created_at_ts values.
+    pub async fn debug_timestamp_distribution(&self) -> Result<TimestampDebugInfo> {
+        // Count tweets with no created_at_ts field
+        let none_count = self
+            .count_query(
+                "SELECT count() as count FROM tweet WHERE created_at_ts IS NONE GROUP ALL",
+            )
+            .await?;
+
+        // Count tweets with created_at_ts = 0
+        let zero_count = self
+            .count_query(
+                "SELECT count() as count FROM tweet WHERE created_at_ts = 0 GROUP ALL",
+            )
+            .await?;
+
+        // Count tweets with valid timestamps
+        let valid_count = self
+            .count_query(
+                "SELECT count() as count FROM tweet WHERE created_at_ts IS NOT NONE AND created_at_ts > 0 GROUP ALL",
+            )
+            .await?;
+
+        // Count distinct timestamps by counting groups
+        let mut distinct_result = self
+            .db
+            .query(
+                "SELECT created_at_ts, count() as count FROM tweet WHERE created_at_ts IS NOT NONE AND created_at_ts > 0 GROUP BY created_at_ts",
+            )
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to fetch distinct count: {e}")))?;
+
+        #[derive(Deserialize)]
+        struct GroupCountResult {
+            #[allow(dead_code)]
+            created_at_ts: i64,
+            #[allow(dead_code)]
+            count: u64,
+        }
+
+        let distinct_records: Vec<GroupCountResult> = distinct_result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse distinct count: {e}")))?;
+
+        let distinct_count = distinct_records.len() as u64;
+
+        // Get actual MIN and MAX using math::min/max
+        let mut minmax_result = self
+            .db
+            .query(
+                "SELECT math::min(created_at_ts) as min_ts, math::max(created_at_ts) as max_ts FROM tweet WHERE created_at_ts IS NOT NONE AND created_at_ts > 0 GROUP ALL",
+            )
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to fetch min/max: {e}")))?;
+
+        #[derive(Deserialize)]
+        struct MinMaxRecord {
+            min_ts: Option<i64>,
+            max_ts: Option<i64>,
+        }
+
+        let minmax_records: Vec<MinMaxRecord> = minmax_result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse min/max: {e}")))?;
+
+        let (min_ts, max_ts) = minmax_records
+            .first()
+            .map(|r| (r.min_ts, r.max_ts))
+            .unwrap_or((None, None));
+
+        let mut result = self
+            .db
+            .query(
+                "SELECT created_at_ts, count() as count FROM tweet
+                 WHERE created_at_ts IS NOT NONE AND created_at_ts > 0
+                 GROUP BY created_at_ts
+                 ORDER BY count DESC
+                 LIMIT 10",
+            )
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to fetch distribution: {e}")))?;
+
+        #[derive(Deserialize)]
+        struct DistRecord {
+            created_at_ts: i64,
+            count: u64,
+        }
+
+        let records: Vec<DistRecord> = result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse distribution: {e}")))?;
+
+        let distribution: Vec<(i64, u64)> = records.into_iter().map(|r| (r.created_at_ts, r.count)).collect();
+
+        Ok(TimestampDebugInfo {
+            none_count,
+            zero_count,
+            valid_count,
+            distinct_count,
+            min_ts,
+            max_ts,
+            distribution,
+        })
+    }
+
     /// Get aggregate counts for database status.
     pub async fn stats(&self) -> Result<DbStats> {
         let tweets = self
@@ -496,10 +613,11 @@ impl SurrealDbStorage {
     }
 
     async fn created_at_bound(&self, newest: bool) -> Result<Option<i64>> {
-        let order = if newest { "DESC" } else { "ASC" };
+        // Use math::min/max instead of ORDER BY which has issues in SurrealDB
+        let func = if newest { "math::max" } else { "math::min" };
         let query = format!(
-            "SELECT created_at_ts FROM tweet WHERE created_at_ts IS NOT NONE AND created_at_ts > 0 ORDER BY created_at_ts {} LIMIT 1",
-            order
+            "SELECT {}(created_at_ts) as created_at_ts FROM tweet WHERE created_at_ts IS NOT NONE AND created_at_ts > 0 GROUP ALL",
+            func
         );
         let mut result = self
             .db

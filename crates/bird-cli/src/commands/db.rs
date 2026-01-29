@@ -34,7 +34,7 @@ pub async fn run_backfill_created_at(
 }
 
 /// Show database status and counts.
-pub async fn run_status(cli: &Cli, show_emoji: bool) -> anyhow::Result<()> {
+pub async fn run_status(cli: &Cli, show_emoji: bool, debug: bool) -> anyhow::Result<()> {
     let StorageConfig::SurrealDb(db_config) = cli.storage_config()? else {
         anyhow::bail!("Status requires SurrealDB storage");
     };
@@ -185,11 +185,7 @@ pub async fn run_status(cli: &Cli, show_emoji: bool) -> anyhow::Result<()> {
     println!("  {}", "Storage".bold());
     match storage_path {
         Some(path) => {
-            println!(
-                "  {:<22} {}",
-                "Path:",
-                path.display().to_string().cyan()
-            );
+            println!("  {:<22} {}", "Path:", path.display().to_string().cyan());
             match storage_size_bytes {
                 Some(size) => {
                     let human = format_bytes(size);
@@ -214,6 +210,77 @@ pub async fn run_status(cli: &Cli, show_emoji: bool) -> anyhow::Result<()> {
                 "Size:",
                 "unavailable for remote endpoint".yellow()
             );
+        }
+    }
+
+    // Debug: show timestamp distribution
+    if debug {
+        println!();
+        println!("  {}", "Debug: Timestamp Analysis".bold());
+        let info = storage.debug_timestamp_distribution().await?;
+
+        println!(
+            "  {:<26} {:>6}",
+            "Tweets with NULL ts:",
+            info.none_count.to_string().yellow()
+        );
+        println!(
+            "  {:<26} {:>6}",
+            "Tweets with ts=0:",
+            info.zero_count.to_string().yellow()
+        );
+        println!(
+            "  {:<26} {:>6}",
+            "Tweets with valid ts:",
+            info.valid_count.to_string().green()
+        );
+        println!(
+            "  {:<26} {:>6}",
+            "Distinct timestamps:",
+            info.distinct_count.to_string().cyan()
+        );
+        println!();
+
+        // Show actual MIN/MAX from math functions
+        let format_ts = |ts: Option<i64>| -> String {
+            ts.and_then(|t| Utc.timestamp_opt(t, 0).single())
+                .map(|d| d.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                .unwrap_or_else(|| "N/A".to_string())
+        };
+        println!(
+            "  {:<26} {} {}",
+            "MIN(created_at_ts):",
+            format_ts(info.min_ts).green(),
+            info.min_ts.map(|t| format!("(ts={})", t)).unwrap_or_default().dimmed()
+        );
+        println!(
+            "  {:<26} {} {}",
+            "MAX(created_at_ts):",
+            format_ts(info.max_ts).green(),
+            info.max_ts.map(|t| format!("(ts={})", t)).unwrap_or_default().dimmed()
+        );
+        println!();
+
+        if info.distribution.is_empty() {
+            println!(
+                "  {:<26} {}",
+                "No valid timestamps:",
+                "run `bird db backfill-created-at`".yellow()
+            );
+        } else {
+            println!("  {}", "Top timestamps by frequency:".dimmed());
+            for (ts, count) in info.distribution {
+                let dt = Utc.timestamp_opt(ts, 0).single();
+                let formatted = dt
+                    .map(|d| d.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                    .unwrap_or_else(|| "invalid".to_string());
+                println!(
+                    "  {:<26} {:>6} tweets  {}",
+                    formatted,
+                    count.to_string().cyan(),
+                    format!("(ts={})", ts).dimmed()
+                );
+            }
         }
     }
 

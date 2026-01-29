@@ -331,7 +331,11 @@ enum DbAction {
     },
 
     /// Show database status and counts.
-    Status,
+    Status {
+        /// Show debug info including timestamp distribution.
+        #[arg(long)]
+        debug: bool,
+    },
 
     /// Ensure database schema and indexes exist.
     Optimize,
@@ -455,7 +459,7 @@ impl Cli {
                 DbAction::BackfillCreatedAt { batch_size } => {
                     db::run_backfill_created_at(&self, *batch_size, show_emoji).await
                 }
-                DbAction::Status => db::run_status(&self, show_emoji).await,
+                DbAction::Status { debug } => db::run_status(&self, show_emoji, *debug).await,
                 DbAction::Optimize => db::run_optimize(&self, show_emoji).await,
             },
             Some(Commands::Config { action }) => match action {

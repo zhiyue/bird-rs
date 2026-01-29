@@ -272,11 +272,7 @@ impl TwitterClient {
                 }
             };
 
-            if !response.status().is_success() {
-                last_error = format!("HTTP {}", response.status());
-                continue;
-            }
-
+            let status = response.status();
             let text = match response.text().await {
                 Ok(t) => t,
                 Err(e) => {
@@ -285,23 +281,43 @@ impl TwitterClient {
                 }
             };
 
-            let username = screen_name_regex
-                .captures(&text)
-                .and_then(|c| c.get(1))
-                .map(|m| m.as_str().to_string());
+            if !status.is_success() {
+                let snippet = text.get(..200).unwrap_or(&text);
+                last_error = format!("HTTP {}: {}", status, snippet);
+                continue;
+            }
 
-            // Try multiple patterns for user ID
-            let id = user_id_regex
-                .captures(&text)
-                .or_else(|| user_id_str_regex.captures(&text))
-                .or_else(|| id_str_regex.captures(&text))
-                .and_then(|c| c.get(1))
-                .map(|m| m.as_str().to_string());
+            let data: serde_json::Value = match serde_json::from_str(&text) {
+                Ok(value) => value,
+                Err(e) => {
+                    last_error = e.to_string();
+                    continue;
+                }
+            };
 
-            let name = name_regex
-                .captures(&text)
-                .and_then(|c| c.get(1))
-                .map(|m| m.as_str().to_string());
+            let username = data
+                .get("screen_name")
+                .and_then(|value| value.as_str())
+                .map(|value| value.to_string())
+                .or_else(|| {
+                    data.get("user")
+                        .and_then(|value| value.get("screen_name"))
+                        .and_then(|value| value.as_str())
+                        .map(|value| value.to_string())
+                });
+
+            let name = data
+                .get("name")
+                .and_then(|value| value.as_str())
+                .map(|value| value.to_string())
+                .or_else(|| {
+                    data.get("user")
+                        .and_then(|value| value.get("name"))
+                        .and_then(|value| value.as_str())
+                        .map(|value| value.to_string())
+                });
+
+            let id = extract_user_id(&data);
 
             if let (Some(id), Some(username)) = (id, username) {
                 self.client_user_id = Some(id.clone());
@@ -313,6 +329,73 @@ impl TwitterClient {
             }
 
             last_error = "Failed to parse user info from response".to_string();
+        }
+
+        // Fallback: scrape the authenticated settings page (HTML) for screen_name/user_id
+        // Only send cookie and user-agent headers (no bearer token for HTML pages)
+        let profile_pages = [
+            "https://x.com/settings/account",
+            "https://twitter.com/settings/account",
+        ];
+        for page in profile_pages {
+            let mut html_headers = HeaderMap::new();
+            html_headers.insert(COOKIE, HeaderValue::from_str(&self.cookie_header).unwrap());
+            html_headers.insert(USER_AGENT, HeaderValue::from_str(&self.user_agent).unwrap());
+
+            let response = match self
+                .http_client
+                .get(page)
+                .headers(html_headers)
+                .send()
+                .await
+            {
+                Ok(resp) => resp,
+                Err(e) => {
+                    last_error = e.to_string();
+                    continue;
+                }
+            };
+
+            if !response.status().is_success() {
+                last_error = format!("HTTP {} (settings page)", response.status());
+                continue;
+            }
+
+            let html = match response.text().await {
+                Ok(text) => text,
+                Err(e) => {
+                    last_error = e.to_string();
+                    continue;
+                }
+            };
+
+            let username = screen_name_regex
+                .captures(&html)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str().to_string());
+
+            let id = user_id_regex
+                .captures(&html)
+                .or_else(|| user_id_str_regex.captures(&html))
+                .or_else(|| id_str_regex.captures(&html))
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str().to_string());
+
+            let name = name_regex
+                .captures(&html)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str().replace("\\\"", "\""));
+
+            if let (Some(id), Some(username)) = (id, username) {
+                self.client_user_id = Some(id.clone());
+                return CurrentUserResult::Success(CurrentUser {
+                    id,
+                    username: username.clone(),
+                    name: name.unwrap_or(username),
+                });
+            }
+
+            last_error = "Failed to parse settings page for user info".to_string();
         }
 
         // Fallback: Try to extract user ID from twid cookie (format: u%3D{user_id} or u={user_id})
@@ -628,6 +711,31 @@ impl TwitterClient {
             }
         }
     }
+}
+
+fn extract_user_id(data: &serde_json::Value) -> Option<String> {
+    let candidates = [
+        data.get("user_id"),
+        data.get("user_id_str"),
+        data.get("id_str"),
+        data.get("id"),
+        data.get("user").and_then(|value| value.get("id_str")),
+        data.get("user").and_then(|value| value.get("id")),
+    ];
+
+    for value in candidates.into_iter().flatten() {
+        if let Some(text) = value.as_str() {
+            return Some(text.to_string());
+        }
+        if let Some(number) = value.as_i64() {
+            return Some(number.to_string());
+        }
+        if let Some(number) = value.as_u64() {
+            return Some(number.to_string());
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]

@@ -338,6 +338,29 @@ enum DbAction {
         batch_size: Option<u32>,
     },
 
+    /// Backfill headlines for long tweets using LLM.
+    BackfillHeadlines {
+        /// Minimum text length (chars) to require headline (default: 200).
+        #[arg(long, default_value = "200")]
+        min_length: usize,
+
+        /// Batch size for LLM calls (default: 20).
+        #[arg(long, default_value = "20")]
+        batch_size: u32,
+
+        /// Maximum total tweets to process (default: unlimited).
+        #[arg(long)]
+        max_tweets: Option<u32>,
+
+        /// LLM provider to use (default: claude-code).
+        #[arg(long, default_value = "claude-code")]
+        provider: String,
+
+        /// LLM model to use.
+        #[arg(long)]
+        model: Option<String>,
+    },
+
     /// Show database status and counts.
     Status {
         /// Show debug info including timestamp distribution.
@@ -497,6 +520,24 @@ impl Cli {
             Some(Commands::Db { action }) => match action {
                 DbAction::BackfillCreatedAt { batch_size } => {
                     db::run_backfill_created_at(&self, *batch_size, show_emoji).await
+                }
+                DbAction::BackfillHeadlines {
+                    min_length,
+                    batch_size,
+                    max_tweets,
+                    provider,
+                    model,
+                } => {
+                    db::run_backfill_headlines(
+                        &self,
+                        *min_length,
+                        *batch_size,
+                        *max_tweets,
+                        provider.clone(),
+                        model.clone(),
+                        show_emoji,
+                    )
+                    .await
                 }
                 DbAction::Status { debug } => db::run_status(&self, show_emoji, *debug).await,
                 DbAction::Optimize => db::run_optimize(&self, show_emoji).await,

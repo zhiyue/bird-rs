@@ -103,6 +103,7 @@ struct TweetRecordContent {
     media: Option<serde_json::Value>,
     article: Option<serde_json::Value>,
     quoted_tweet: Option<serde_json::Value>,
+    headline: Option<String>,
     fetched_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -139,6 +140,8 @@ struct TweetRecord {
     media: Option<serde_json::Value>,
     article: Option<serde_json::Value>,
     quoted_tweet: Option<serde_json::Value>,
+    #[serde(default)]
+    headline: Option<String>,
     #[allow(dead_code)]
     fetched_at: DateTime<Utc>,
     #[allow(dead_code)]
@@ -186,6 +189,7 @@ impl From<&TweetData> for TweetRecordContent {
                 .quoted_tweet
                 .as_ref()
                 .and_then(|q| serde_json::to_value(q.as_ref()).ok()),
+            headline: tweet.headline.clone(),
             fetched_at: now,
             updated_at: now,
         }
@@ -242,6 +246,7 @@ impl TryFrom<TweetRecord> for TweetData {
                 .map(serde_json::from_value)
                 .transpose()
                 .map_err(|e| Error::Serialization(e.to_string()))?,
+            headline: record.headline,
             _raw: None,
         })
     }
@@ -1059,6 +1064,52 @@ impl TweetStore for SurrealDbStorage {
         // For now, just return the most recent tweets (time filtering TODO)
         self.get_tweets_by_collection(collection, user_id, limit, None)
             .await
+    }
+
+    async fn get_tweets_missing_headlines(
+        &self,
+        min_length: usize,
+        limit: Option<u32>,
+    ) -> Result<Vec<TweetData>> {
+        let limit = limit.unwrap_or(100);
+        let min_len = min_length as u32;
+
+        // Query tweets where headline is None and text length exceeds threshold
+        let mut result = self
+            .db
+            .query(
+                "SELECT * FROM tweet WHERE headline IS NONE AND string::len(text) > $min_len LIMIT $limit",
+            )
+            .bind(("min_len", min_len))
+            .bind(("limit", limit))
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get tweets missing headlines: {}", e)))?;
+
+        let records: Vec<TweetRecord> = result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse tweets: {}", e)))?;
+
+        records.into_iter().map(|r| r.try_into()).collect()
+    }
+
+    async fn update_tweet_headlines(&self, headlines: &[(String, String)]) -> Result<usize> {
+        let mut updated = 0;
+
+        for (tweet_id, headline) in headlines {
+            let query = format!(
+                "UPDATE tweet:⟨{}⟩ SET headline = $headline, updated_at = $now",
+                tweet_id
+            );
+            self.db
+                .query(&query)
+                .bind(("headline", headline.clone()))
+                .bind(("now", Utc::now()))
+                .await
+                .map_err(|e| Error::Storage(format!("Failed to update headline: {}", e)))?;
+            updated += 1;
+        }
+
+        Ok(updated)
     }
 }
 

@@ -60,6 +60,17 @@ pub trait TweetStore: Send + Sync {
         end_time: chrono::DateTime<chrono::Utc>,
         limit: Option<u32>,
     ) -> Result<Vec<TweetData>>;
+
+    /// Get tweets that need headlines (text > min_length chars and no headline).
+    async fn get_tweets_missing_headlines(
+        &self,
+        min_length: usize,
+        limit: Option<u32>,
+    ) -> Result<Vec<TweetData>>;
+
+    /// Update headlines for multiple tweets.
+    /// Takes a slice of (tweet_id, headline) pairs.
+    async fn update_tweet_headlines(&self, headlines: &[(String, String)]) -> Result<usize>;
 }
 
 /// Trait for storing sync state.

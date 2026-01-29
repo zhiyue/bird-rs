@@ -46,7 +46,15 @@ Important:
 - Ensure valid JSON output (no trailing commas, proper escaping)"#.to_string()
 }
 
+/// Threshold for considering a tweet "long" (characters).
+const HEADLINE_THRESHOLD: usize = 200;
+
+/// Maximum preview length for long tweets (characters).
+const PREVIEW_LENGTH: usize = 100;
+
 /// Build the user prompt with tweet content.
+/// For long tweets with headlines, shows the headline and a preview.
+/// For short tweets, shows the full text.
 pub fn build_user_prompt(tweets: &[TweetData], period_description: &str) -> String {
     let mut prompt = format!(
         "Analyze the following {} tweets from {} and extract insights:\n\n",
@@ -55,24 +63,46 @@ pub fn build_user_prompt(tweets: &[TweetData], period_description: &str) -> Stri
     );
 
     for (i, tweet) in tweets.iter().enumerate() {
-        prompt.push_str(&format!(
-            "---\nTweet {}:\n@{}: {}\n",
-            i + 1,
-            tweet.author.username,
-            tweet.text
-        ));
+        prompt.push_str(&format!("---\nTweet {}:\n@{}: ", i + 1, tweet.author.username));
+
+        // Format tweet text based on whether it has a headline
+        prompt.push_str(&format_tweet_text(tweet));
+        prompt.push('\n');
 
         // Include quoted tweet if present
         if let Some(quoted) = &tweet.quoted_tweet {
             prompt.push_str(&format!(
                 "[Quoted @{}]: {}\n",
-                quoted.author.username, quoted.text
+                quoted.author.username,
+                format_tweet_text(quoted)
             ));
         }
     }
 
     prompt.push_str("\n---\nProvide your analysis as JSON:");
     prompt
+}
+
+/// Format tweet text for the prompt.
+/// If the tweet has a headline and is long, show headline + preview.
+/// Otherwise show the full text.
+fn format_tweet_text(tweet: &TweetData) -> String {
+    let char_count = tweet.text.chars().count();
+
+    // If tweet is short, always show full text
+    if char_count <= HEADLINE_THRESHOLD {
+        return tweet.text.clone();
+    }
+
+    // For long tweets, use headline if available
+    if let Some(ref headline) = tweet.headline {
+        let preview: String = tweet.text.chars().take(PREVIEW_LENGTH).collect();
+        let preview = preview.trim();
+        format!("[HEADLINE: {}] {}...", headline, preview)
+    } else {
+        // No headline yet, show full text
+        tweet.text.clone()
+    }
 }
 
 /// Parse the LLM response into InsightsResult.

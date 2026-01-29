@@ -112,6 +112,9 @@ pub struct TweetData {
     /// Article metadata (for long-form posts).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub article: Option<TweetArticle>,
+    /// LLM-generated headline for long tweets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headline: Option<String>,
     /// Raw GraphQL response (when include_raw is enabled).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub _raw: Option<serde_json::Value>,

@@ -763,6 +763,7 @@ mod tests {
             quoted_tweet: None,
             media: None,
             article: None,
+            headline: None,
             _raw: None,
         }
     }

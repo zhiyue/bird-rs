@@ -188,6 +188,44 @@ impl TweetStore for MemoryStorage {
         self.get_tweets_by_collection(collection, user_id, limit, None)
             .await
     }
+
+    async fn get_tweets_missing_headlines(
+        &self,
+        min_length: usize,
+        limit: Option<u32>,
+    ) -> Result<Vec<TweetData>> {
+        let tweets = self
+            .tweets
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+        let limit = limit.unwrap_or(100) as usize;
+
+        let results: Vec<TweetData> = tweets
+            .values()
+            .filter(|t| t.headline.is_none() && t.text.chars().count() > min_length)
+            .take(limit)
+            .cloned()
+            .collect();
+
+        Ok(results)
+    }
+
+    async fn update_tweet_headlines(&self, headlines: &[(String, String)]) -> Result<usize> {
+        let mut tweets = self
+            .tweets
+            .write()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+        let mut updated = 0;
+
+        for (tweet_id, headline) in headlines {
+            if let Some(tweet) = tweets.get_mut(tweet_id) {
+                tweet.headline = Some(headline.clone());
+                updated += 1;
+            }
+        }
+
+        Ok(updated)
+    }
 }
 
 #[async_trait]
@@ -360,6 +398,7 @@ mod tests {
             quoted_tweet: None,
             media: None,
             article: None,
+            headline: None,
             _raw: None,
         };
 
@@ -391,6 +430,7 @@ mod tests {
             quoted_tweet: None,
             media: None,
             article: None,
+            headline: None,
             _raw: None,
         };
 
@@ -449,6 +489,7 @@ mod tests {
             quoted_tweet: None,
             media: None,
             article: None,
+            headline: None,
             _raw: None,
         };
 

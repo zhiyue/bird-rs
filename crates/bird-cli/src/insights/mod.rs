@@ -1,16 +1,19 @@
 //! Insights generation from synced tweets using LLM analysis.
 
 pub mod entities;
+pub mod headlines;
 pub mod llm;
 pub mod output;
 pub mod prompt;
 
 use crate::insights::entities::InsightsResult;
+use crate::insights::headlines::{collect_all_tweets_needing_headlines, generate_headlines};
 use crate::insights::llm::{LlmError, LlmProvider, LlmRequest};
 use crate::insights::prompt::{build_system_prompt, build_user_prompt, parse_response};
 use bird_client::TweetData;
 use bird_storage::Storage;
 use chrono::{DateTime, Duration, Utc};
+use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -60,7 +63,10 @@ impl std::str::FromStr for TimePeriod {
             "day" | "d" | "1d" => Ok(TimePeriod::Day),
             "week" | "w" | "1w" | "7d" => Ok(TimePeriod::Week),
             "month" | "m" | "1m" | "30d" => Ok(TimePeriod::Month),
-            _ => Err(format!("Invalid time period: {}. Use day, week, or month.", s)),
+            _ => Err(format!(
+                "Invalid time period: {}. Use day, week, or month.",
+                s
+            )),
         }
     }
 }
@@ -231,6 +237,41 @@ impl InsightsEngine {
         // Log tweet count for debugging
         eprintln!("  Found {} tweets to analyze", tweets.len());
 
+        // Generate headlines for long tweets that don't have them
+        let tweets_needing_headlines = collect_all_tweets_needing_headlines(&tweets);
+        if !tweets_needing_headlines.is_empty() {
+            eprintln!(
+                "  Generating headlines for {} long tweets...",
+                tweets_needing_headlines.len()
+            );
+
+            match generate_headlines(&tweets_needing_headlines, self.llm.as_ref()).await {
+                Ok(headlines) => {
+                    if !headlines.is_empty() {
+                        eprintln!("  Generated {} headlines", headlines.len());
+
+                        // Store headlines in the database
+                        let headline_pairs: Vec<(String, String)> =
+                            headlines.into_iter().collect();
+                        if let Err(e) = self
+                            .storage
+                            .update_tweet_headlines(&headline_pairs)
+                            .await
+                        {
+                            eprintln!("  Warning: Failed to cache headlines: {}", e);
+                        }
+
+                        // Apply headlines to local tweet structs
+                        apply_headlines_to_tweets(&mut tweets, &headline_pairs);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("  Warning: Failed to generate headlines: {}", e);
+                    // Continue with analysis even without headlines
+                }
+            }
+        }
+
         // Generate insights using LLM
         self.analyze_tweets(&tweets, options).await
     }
@@ -268,8 +309,7 @@ impl InsightsEngine {
 
         let response = self.llm.complete(request).await?;
 
-        parse_response(&response.content, tweets.len())
-            .map_err(InsightsError::ParseError)
+        parse_response(&response.content, tweets.len()).map_err(InsightsError::ParseError)
     }
 
     /// Get the LLM provider name.
@@ -280,5 +320,26 @@ impl InsightsEngine {
     /// Get the LLM model.
     pub fn llm_model(&self) -> &str {
         self.llm.model()
+    }
+}
+
+/// Apply headlines from a map to tweet structs (including quoted tweets).
+fn apply_headlines_to_tweets(tweets: &mut [TweetData], headlines: &[(String, String)]) {
+    let headline_map: HashMap<&str, &str> = headlines
+        .iter()
+        .map(|(id, h)| (id.as_str(), h.as_str()))
+        .collect();
+
+    for tweet in tweets.iter_mut() {
+        if let Some(headline) = headline_map.get(tweet.id.as_str()) {
+            tweet.headline = Some(headline.to_string());
+        }
+
+        // Also apply to quoted tweets
+        if let Some(ref mut quoted) = tweet.quoted_tweet {
+            if let Some(headline) = headline_map.get(quoted.id.as_str()) {
+                quoted.headline = Some(headline.to_string());
+            }
+        }
     }
 }

@@ -220,6 +220,7 @@ pub(crate) fn parse_tweet_result(
         quoted_tweet,
         media,
         article,
+        headline: None,
         _raw: None,
     })
 }

@@ -2,10 +2,20 @@
 
 use crate::cli::Cli;
 use crate::output::format_json;
-use crate::sync_engine::{SyncEngine, SyncOptions};
+use crate::storage_monitor::{format_bytes, parse_size, StorageMonitor};
+use crate::sync_engine::{SyncEngine, SyncOptions, SyncProgress};
 use bird_client::{Collection, CurrentUserResult, RateLimitConfig};
+use bird_storage::StorageConfig;
 use chrono::Utc;
 use colored::Colorize;
+
+/// Get endpoint string from StorageConfig for monitoring.
+fn get_storage_endpoint(config: &StorageConfig) -> Option<String> {
+    match config {
+        StorageConfig::SurrealDb(cfg) => Some(cfg.endpoint.clone()),
+        StorageConfig::Memory => None,
+    }
+}
 
 /// Run the sync likes command.
 pub async fn run_sync_likes(
@@ -14,6 +24,7 @@ pub async fn run_sync_likes(
     max_pages: Option<u32>,
     delay_ms: Option<u64>,
     no_backfill: bool,
+    max_storage: Option<String>,
     show_emoji: bool,
 ) -> anyhow::Result<()> {
     run_sync(
@@ -23,6 +34,7 @@ pub async fn run_sync_likes(
         max_pages,
         delay_ms,
         no_backfill,
+        max_storage,
         show_emoji,
     )
     .await
@@ -35,6 +47,7 @@ pub async fn run_sync_bookmarks(
     max_pages: Option<u32>,
     delay_ms: Option<u64>,
     no_backfill: bool,
+    max_storage: Option<String>,
     show_emoji: bool,
 ) -> anyhow::Result<()> {
     run_sync(
@@ -44,6 +57,7 @@ pub async fn run_sync_bookmarks(
         max_pages,
         delay_ms,
         no_backfill,
+        max_storage,
         show_emoji,
     )
     .await
@@ -56,6 +70,7 @@ pub async fn run_sync_posts(
     max_pages: Option<u32>,
     delay_ms: Option<u64>,
     no_backfill: bool,
+    max_storage: Option<String>,
     show_emoji: bool,
 ) -> anyhow::Result<()> {
     run_sync(
@@ -65,6 +80,7 @@ pub async fn run_sync_posts(
         max_pages,
         delay_ms,
         no_backfill,
+        max_storage,
         show_emoji,
     )
     .await
@@ -76,10 +92,12 @@ pub async fn run_backfill(
     collection: Collection,
     max_pages: Option<u32>,
     delay_ms: Option<u64>,
+    max_storage: Option<String>,
     show_emoji: bool,
 ) -> anyhow::Result<()> {
     let mut client = cli.create_client()?;
     let storage = cli.create_storage().await?;
+    let db_config = cli.storage_config()?;
 
     // Get current user ID
     let user_id = match client.get_current_user().await {
@@ -88,6 +106,23 @@ pub async fn run_backfill(
             anyhow::bail!("Failed to get current user: {}", e);
         }
     };
+
+    // Parse max storage limit
+    let max_storage_bytes = parse_max_storage(&max_storage)?;
+
+    // Create storage monitor
+    let storage_endpoint = get_storage_endpoint(&db_config);
+    let storage_monitor = storage_endpoint
+        .as_ref()
+        .map(|e| StorageMonitor::from_endpoint(e, max_storage_bytes))
+        .unwrap_or_else(|| StorageMonitor::new(None, max_storage_bytes));
+
+    // Show initial storage info
+    if storage_monitor.is_available() {
+        let progress = storage_monitor.progress_info();
+        let icon = if show_emoji { "💾 " } else { "" };
+        eprintln!("{}Storage: {}", icon, progress.format().cyan());
+    }
 
     let icon = if show_emoji { "⏪ " } else { "" };
     println!(
@@ -100,12 +135,14 @@ pub async fn run_backfill(
     // Build rate limit config
     let rate_limit = RateLimitConfig::with_delay(delay_ms.unwrap_or(1000));
 
-    // Build sync options
+    // Build sync options with storage monitor and progress callback
     let options = SyncOptions {
         full: false,
         max_pages: max_pages.or(Some(10)), // Conservative default
         no_backfill: false,
         rate_limit,
+        storage_monitor: Some(storage_monitor),
+        on_progress: Some(create_progress_callback(show_emoji)),
     };
 
     // Create sync engine
@@ -123,6 +160,7 @@ pub async fn run_backfill(
 }
 
 /// Run sync for a specific collection.
+#[allow(clippy::too_many_arguments)]
 async fn run_sync(
     cli: &Cli,
     collection: Collection,
@@ -130,10 +168,12 @@ async fn run_sync(
     max_pages: Option<u32>,
     delay_ms: Option<u64>,
     no_backfill: bool,
+    max_storage: Option<String>,
     show_emoji: bool,
 ) -> anyhow::Result<()> {
     let mut client = cli.create_client()?;
     let storage = cli.create_storage().await?;
+    let db_config = cli.storage_config()?;
 
     // Get current user ID
     let user_id = match client.get_current_user().await {
@@ -142,6 +182,23 @@ async fn run_sync(
             anyhow::bail!("Failed to get current user: {}", e);
         }
     };
+
+    // Parse max storage limit
+    let max_storage_bytes = parse_max_storage(&max_storage)?;
+
+    // Create storage monitor
+    let storage_endpoint = get_storage_endpoint(&db_config);
+    let storage_monitor = storage_endpoint
+        .as_ref()
+        .map(|e| StorageMonitor::from_endpoint(e, max_storage_bytes))
+        .unwrap_or_else(|| StorageMonitor::new(None, max_storage_bytes));
+
+    // Show initial storage info
+    if storage_monitor.is_available() {
+        let progress = storage_monitor.progress_info();
+        let icon = if show_emoji { "💾 " } else { "" };
+        eprintln!("{}Storage: {}", icon, progress.format().cyan());
+    }
 
     let icon = if show_emoji { "🔄 " } else { "" };
     println!(
@@ -154,12 +211,14 @@ async fn run_sync(
     // Build rate limit config
     let rate_limit = RateLimitConfig::with_delay(delay_ms.unwrap_or(1000));
 
-    // Build sync options
+    // Build sync options with storage monitor and progress callback
     let options = SyncOptions {
         full,
         max_pages: max_pages.or(Some(10)), // Conservative default
         no_backfill,
         rate_limit,
+        storage_monitor: Some(storage_monitor),
+        on_progress: Some(create_progress_callback(show_emoji)),
     };
 
     // Create sync engine
@@ -174,6 +233,39 @@ async fn run_sync(
     output_sync_result(cli, &collection, &result, show_emoji);
 
     Ok(())
+}
+
+/// Parse max storage string to bytes.
+fn parse_max_storage(max_storage: &Option<String>) -> anyhow::Result<Option<u64>> {
+    match max_storage {
+        Some(s) => {
+            let bytes =
+                parse_size(s).map_err(|e| anyhow::anyhow!("Invalid --max-storage: {}", e))?;
+            Ok(Some(bytes))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Create a progress callback for sync operations.
+fn create_progress_callback(show_emoji: bool) -> Box<dyn Fn(&SyncProgress) + Send + Sync> {
+    Box::new(move |progress: &SyncProgress| {
+        let icon = if show_emoji { "📊 " } else { "" };
+        let storage_info = match (&progress.storage_formatted, &progress.max_storage_bytes) {
+            (Some(current), Some(max)) => {
+                format!(" | Storage: {} / {}", current.cyan(), format_bytes(*max))
+            }
+            (Some(current), None) => format!(" | Storage: {}", current.cyan()),
+            _ => String::new(),
+        };
+        eprintln!(
+            "{}Progress: {} fetched, {} new{}",
+            icon,
+            progress.tweets_fetched.to_string().green(),
+            progress.new_tweets.to_string().green().bold(),
+            storage_info
+        );
+    })
 }
 
 /// Output sync result.
@@ -192,6 +284,9 @@ fn output_sync_result(
             total_fetched: usize,
             stopped_at_known: bool,
             has_more_history: bool,
+            stopped_at_storage_limit: bool,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            final_storage_bytes: Option<u64>,
         }
 
         println!(
@@ -203,6 +298,8 @@ fn output_sync_result(
                 total_fetched: result.total_fetched,
                 stopped_at_known: result.stopped_at_known,
                 has_more_history: result.has_more_history,
+                stopped_at_storage_limit: result.stopped_at_storage_limit,
+                final_storage_bytes: result.final_storage_bytes,
             })
         );
     } else {
@@ -223,13 +320,32 @@ fn output_sync_result(
             );
         }
 
-        if result.has_more_history {
+        if result.stopped_at_storage_limit {
+            let warn = if show_emoji { "⚠️  " } else { "" };
+            let storage_info = result
+                .final_storage_bytes
+                .map(|b| format!(" (current: {})", format_bytes(b)))
+                .unwrap_or_default();
+            println!(
+                "{}Storage limit reached - sync halted{}",
+                warn.yellow(),
+                storage_info
+            );
+        }
+
+        if result.has_more_history && !result.stopped_at_storage_limit {
             let info = if show_emoji { "📚 " } else { "" };
             println!(
                 "{}More history available. Run `bird sync backfill {}` to continue.",
                 info.yellow(),
                 collection.as_str()
             );
+        }
+
+        // Show final storage size
+        if let Some(bytes) = result.final_storage_bytes {
+            let icon = if show_emoji { "💾 " } else { "" };
+            println!("{}Final storage size: {}", icon, format_bytes(bytes).cyan());
         }
     }
 }

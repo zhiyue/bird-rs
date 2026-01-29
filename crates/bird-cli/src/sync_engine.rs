@@ -4,6 +4,7 @@
 //! - **Forward sync**: Fetch new items since last sync (stop at newest_item_id)
 //! - **Backfill sync**: Continue fetching older items (resume from backfill_cursor)
 
+use crate::storage_monitor::StorageMonitor;
 use bird_client::{Collection, PaginatedResult, PaginationOptions, RateLimitConfig, TwitterClient};
 use bird_storage::Storage;
 use std::sync::Arc;
@@ -20,6 +21,24 @@ pub struct SyncResult {
     pub has_more_history: bool,
     /// The sync direction that was performed.
     pub direction: SyncDirection,
+    /// Whether sync was stopped due to storage limit.
+    pub stopped_at_storage_limit: bool,
+    /// Final storage size in bytes (if available).
+    pub final_storage_bytes: Option<u64>,
+}
+
+impl SyncResult {
+    fn empty(direction: SyncDirection) -> Self {
+        Self {
+            new_tweets: 0,
+            total_fetched: 0,
+            stopped_at_known: false,
+            has_more_history: false,
+            direction,
+            stopped_at_storage_limit: false,
+            final_storage_bytes: None,
+        }
+    }
 }
 
 /// Direction of sync operation.
@@ -43,6 +62,24 @@ impl std::fmt::Display for SyncDirection {
     }
 }
 
+/// Callback for sync progress updates.
+pub type ProgressCallback = Box<dyn Fn(&SyncProgress) + Send + Sync>;
+
+/// Progress information during sync.
+#[derive(Debug, Clone)]
+pub struct SyncProgress {
+    /// Tweets fetched so far.
+    pub tweets_fetched: usize,
+    /// New tweets stored so far.
+    pub new_tweets: usize,
+    /// Current storage size in bytes (if available).
+    pub storage_bytes: Option<u64>,
+    /// Storage size formatted (if available).
+    pub storage_formatted: Option<String>,
+    /// Max storage bytes (if limit set).
+    pub max_storage_bytes: Option<u64>,
+}
+
 /// Options for sync operation.
 pub struct SyncOptions {
     /// Full re-sync (ignore previous sync state).
@@ -53,6 +90,10 @@ pub struct SyncOptions {
     pub no_backfill: bool,
     /// Rate limit configuration.
     pub rate_limit: RateLimitConfig,
+    /// Storage monitor for size checking and circuit breaker.
+    pub storage_monitor: Option<StorageMonitor>,
+    /// Progress callback for real-time updates.
+    pub on_progress: Option<ProgressCallback>,
 }
 
 impl Default for SyncOptions {
@@ -62,6 +103,8 @@ impl Default for SyncOptions {
             max_pages: Some(10), // Conservative default
             no_backfill: false,
             rate_limit: RateLimitConfig::default(),
+            storage_monitor: None,
+            on_progress: None,
         }
     }
 }
@@ -78,6 +121,45 @@ impl SyncEngine {
         Self { client, storage }
     }
 
+    /// Check storage limit and return error if exceeded.
+    fn check_storage_limit(&self, options: &SyncOptions) -> Result<(), anyhow::Error> {
+        if let Some(ref monitor) = options.storage_monitor {
+            monitor
+                .check_limit()
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+        }
+        Ok(())
+    }
+
+    /// Report progress via callback if set.
+    fn report_progress(&self, options: &SyncOptions, tweets_fetched: usize, new_tweets: usize) {
+        if let Some(ref callback) = options.on_progress {
+            let (storage_bytes, storage_formatted) =
+                if let Some(ref monitor) = options.storage_monitor {
+                    (monitor.current_size(), monitor.current_size_formatted())
+                } else {
+                    (None, None)
+                };
+
+            let progress = SyncProgress {
+                tweets_fetched,
+                new_tweets,
+                storage_bytes,
+                storage_formatted,
+                max_storage_bytes: options.storage_monitor.as_ref().and_then(|m| m.max_bytes()),
+            };
+            callback(&progress);
+        }
+    }
+
+    /// Get current storage size from monitor.
+    fn current_storage_size(&self, options: &SyncOptions) -> Option<u64> {
+        options
+            .storage_monitor
+            .as_ref()
+            .and_then(|m| m.current_size())
+    }
+
     /// Sync a collection to storage.
     ///
     /// Bidirectional sync strategy:
@@ -90,6 +172,9 @@ impl SyncEngine {
         user_id: &str,
         options: &SyncOptions,
     ) -> anyhow::Result<SyncResult> {
+        // Check storage limit before starting
+        self.check_storage_limit(options)?;
+
         // Get existing sync state (unless doing full sync)
         let sync_state = if options.full {
             None
@@ -147,13 +232,7 @@ impl SyncEngine {
         let total_fetched = result.items.len();
 
         if result.items.is_empty() {
-            return Ok(SyncResult {
-                new_tweets: 0,
-                total_fetched: 0,
-                stopped_at_known: false,
-                has_more_history: false,
-                direction: SyncDirection::Full,
-            });
+            return Ok(SyncResult::empty(SyncDirection::Full));
         }
 
         // Get newest and oldest IDs
@@ -170,12 +249,18 @@ impl SyncEngine {
                 .await?;
         }
 
+        // Report progress after storing
+        self.report_progress(options, total_fetched, new_count);
+
+        // Check storage limit after storing
+        let stopped_at_storage_limit = self.check_storage_limit(options).is_err();
+
         // Create new sync state
         let mut state = bird_client::SyncState::new(collection.as_str(), user_id);
         state.newest_item_id = newest_id;
         state.oldest_item_id = oldest_id;
         state.backfill_cursor = result.next_cursor;
-        state.has_more_history = result.has_more;
+        state.has_more_history = result.has_more && !stopped_at_storage_limit;
         state.total_synced = total_fetched as u64;
         apply_rate_limit_info(&mut state, &options.rate_limit);
         self.storage.update_sync_state(&state).await?;
@@ -184,8 +269,10 @@ impl SyncEngine {
             new_tweets: new_count,
             total_fetched,
             stopped_at_known: false,
-            has_more_history: result.has_more,
+            has_more_history: result.has_more && !stopped_at_storage_limit,
             direction: SyncDirection::Full,
+            stopped_at_storage_limit,
+            final_storage_bytes: self.current_storage_size(options),
         })
     }
 
@@ -214,11 +301,10 @@ impl SyncEngine {
 
         if result.items.is_empty() {
             return Ok(SyncResult {
-                new_tweets: 0,
-                total_fetched: 0,
                 stopped_at_known: result.stopped_at_known,
                 has_more_history: sync_state.has_more_history,
                 direction: SyncDirection::Forward,
+                ..SyncResult::empty(SyncDirection::Forward)
             });
         }
 
@@ -235,8 +321,17 @@ impl SyncEngine {
                 .await?;
         }
 
+        // Report progress after storing
+        self.report_progress(options, total_fetched, new_count);
+
+        // Check storage limit after storing
+        let stopped_at_storage_limit = self.check_storage_limit(options).is_err();
+
         // Update sync state for forward sync
         sync_state.update_forward(newest_id, total_fetched as u64);
+        if stopped_at_storage_limit {
+            sync_state.has_more_history = false;
+        }
         apply_rate_limit_info(&mut sync_state, &options.rate_limit);
         self.storage.update_sync_state(&sync_state).await?;
 
@@ -244,8 +339,10 @@ impl SyncEngine {
             new_tweets: new_count,
             total_fetched,
             stopped_at_known: result.stopped_at_known,
-            has_more_history: sync_state.has_more_history,
+            has_more_history: sync_state.has_more_history && !stopped_at_storage_limit,
             direction: SyncDirection::Forward,
+            stopped_at_storage_limit,
+            final_storage_bytes: self.current_storage_size(options),
         })
     }
 
@@ -272,13 +369,7 @@ impl SyncEngine {
             sync_state.backfill_cursor = None;
             self.storage.update_sync_state(&sync_state).await?;
 
-            return Ok(SyncResult {
-                new_tweets: 0,
-                total_fetched: 0,
-                stopped_at_known: false,
-                has_more_history: false,
-                direction: SyncDirection::Backfill,
-            });
+            return Ok(SyncResult::empty(SyncDirection::Backfill));
         }
 
         // Get oldest ID from fetched items
@@ -294,11 +385,17 @@ impl SyncEngine {
                 .await?;
         }
 
+        // Report progress after storing
+        self.report_progress(options, total_fetched, new_count);
+
+        // Check storage limit after storing
+        let stopped_at_storage_limit = self.check_storage_limit(options).is_err();
+
         // Update sync state for backfill
         sync_state.update_backfill(
             oldest_id,
             result.next_cursor,
-            result.has_more,
+            result.has_more && !stopped_at_storage_limit,
             total_fetched as u64,
         );
         apply_rate_limit_info(&mut sync_state, &options.rate_limit);
@@ -308,8 +405,10 @@ impl SyncEngine {
             new_tweets: new_count,
             total_fetched,
             stopped_at_known: false,
-            has_more_history: result.has_more,
+            has_more_history: result.has_more && !stopped_at_storage_limit,
             direction: SyncDirection::Backfill,
+            stopped_at_storage_limit,
+            final_storage_bytes: self.current_storage_size(options),
         })
     }
 
@@ -320,6 +419,9 @@ impl SyncEngine {
         user_id: &str,
         options: &SyncOptions,
     ) -> anyhow::Result<SyncResult> {
+        // Check storage limit before starting
+        self.check_storage_limit(options)?;
+
         let sync_state = self
             .storage
             .get_sync_state(collection.as_str(), user_id)
@@ -330,13 +432,7 @@ impl SyncEngine {
                 self.do_backfill_sync(collection, user_id, options, state)
                     .await
             }
-            Some(_) => Ok(SyncResult {
-                new_tweets: 0,
-                total_fetched: 0,
-                stopped_at_known: false,
-                has_more_history: false,
-                direction: SyncDirection::Backfill,
-            }),
+            Some(_) => Ok(SyncResult::empty(SyncDirection::Backfill)),
             None => {
                 // No sync state, need to do initial sync first
                 Err(anyhow::anyhow!(

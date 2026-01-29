@@ -33,10 +33,18 @@ pub struct DbStats {
     pub tweets: u64,
     /// Total collection entries.
     pub collections: u64,
+    /// Total bookmark entries.
+    pub bookmarks: u64,
+    /// Total like entries.
+    pub likes: u64,
     /// Total sync state entries.
     pub sync_states: u64,
     /// Tweets missing created_at_ts.
     pub missing_created_at_ts: u64,
+    /// Oldest tweet timestamp (Unix seconds).
+    pub oldest_tweet_ts: Option<i64>,
+    /// Newest tweet timestamp (Unix seconds).
+    pub newest_tweet_ts: Option<i64>,
 }
 
 /// Authentication configuration for remote SurrealDB connections.
@@ -437,18 +445,34 @@ impl SurrealDbStorage {
         let collections = self
             .count_query("SELECT count() as count FROM tweet_collection GROUP ALL")
             .await?;
+        let bookmarks = self
+            .count_query(
+                "SELECT count() as count FROM tweet_collection WHERE collection = 'bookmarks' GROUP ALL",
+            )
+            .await?;
+        let likes = self
+            .count_query(
+                "SELECT count() as count FROM tweet_collection WHERE collection = 'likes' GROUP ALL",
+            )
+            .await?;
         let sync_states = self
             .count_query("SELECT count() as count FROM sync_state GROUP ALL")
             .await?;
         let missing_created_at_ts = self
             .count_query("SELECT count() as count FROM tweet WHERE created_at_ts IS NONE GROUP ALL")
             .await?;
+        let oldest_tweet_ts = self.created_at_bound(false).await?;
+        let newest_tweet_ts = self.created_at_bound(true).await?;
 
         Ok(DbStats {
             tweets,
             collections,
+            bookmarks,
+            likes,
             sync_states,
             missing_created_at_ts,
+            oldest_tweet_ts,
+            newest_tweet_ts,
         })
     }
 
@@ -469,6 +493,33 @@ impl SurrealDbStorage {
             .map_err(|e| Error::Storage(format!("Failed to parse count: {e}")))?;
 
         Ok(records.first().map(|r| r.count).unwrap_or(0))
+    }
+
+    async fn created_at_bound(&self, newest: bool) -> Result<Option<i64>> {
+        let order = if newest { "DESC" } else { "ASC" };
+        let query = format!(
+            "SELECT created_at_ts FROM tweet WHERE created_at_ts IS NOT NONE AND created_at_ts > 0 ORDER BY created_at_ts {} LIMIT 1",
+            order
+        );
+        let mut result = self
+            .db
+            .query(&query)
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to fetch timestamp: {e}")))?;
+
+        #[derive(Deserialize)]
+        struct CreatedAtResult {
+            created_at_ts: Option<i64>,
+        }
+
+        let records: Vec<CreatedAtResult> = result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse timestamp: {e}")))?;
+
+        Ok(records
+            .first()
+            .and_then(|r| r.created_at_ts)
+            .filter(|ts| *ts > 0))
     }
 
     /// Initialize the database schema.

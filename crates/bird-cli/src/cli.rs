@@ -241,6 +241,10 @@ enum SyncAction {
         /// Skip backfill, only fetch new items.
         #[arg(long)]
         no_backfill: bool,
+
+        /// Maximum storage size before stopping sync (e.g., "5GB", "500MB").
+        #[arg(long)]
+        max_storage: Option<String>,
     },
 
     /// Sync bookmarked tweets to database.
@@ -260,6 +264,10 @@ enum SyncAction {
         /// Skip backfill, only fetch new items.
         #[arg(long)]
         no_backfill: bool,
+
+        /// Maximum storage size before stopping sync (e.g., "5GB", "500MB").
+        #[arg(long)]
+        max_storage: Option<String>,
     },
 
     /// Sync your own tweets/posts to database.
@@ -279,6 +287,10 @@ enum SyncAction {
         /// Skip backfill, only fetch new items.
         #[arg(long)]
         no_backfill: bool,
+
+        /// Maximum storage size before stopping sync (e.g., "5GB", "500MB").
+        #[arg(long)]
+        max_storage: Option<String>,
     },
 
     /// Continue backfilling older tweets.
@@ -293,6 +305,10 @@ enum SyncAction {
         /// Delay between page requests in milliseconds (default: 1000).
         #[arg(long)]
         delay: Option<u64>,
+
+        /// Maximum storage size before stopping sync (e.g., "5GB", "500MB").
+        #[arg(long)]
+        max_storage: Option<String>,
     },
 
     /// Show sync status for all collections.
@@ -365,15 +381,25 @@ impl Cli {
                     max_pages,
                     delay,
                     no_backfill,
+                    max_storage,
                 } => {
-                    sync::run_sync_likes(&self, *full, *max_pages, *delay, *no_backfill, show_emoji)
-                        .await
+                    sync::run_sync_likes(
+                        &self,
+                        *full,
+                        *max_pages,
+                        *delay,
+                        *no_backfill,
+                        max_storage.clone(),
+                        show_emoji,
+                    )
+                    .await
                 }
                 SyncAction::Bookmarks {
                     full,
                     max_pages,
                     delay,
                     no_backfill,
+                    max_storage,
                 } => {
                     sync::run_sync_bookmarks(
                         &self,
@@ -381,6 +407,7 @@ impl Cli {
                         *max_pages,
                         *delay,
                         *no_backfill,
+                        max_storage.clone(),
                         show_emoji,
                     )
                     .await
@@ -390,18 +417,36 @@ impl Cli {
                     max_pages,
                     delay,
                     no_backfill,
+                    max_storage,
                 } => {
-                    sync::run_sync_posts(&self, *full, *max_pages, *delay, *no_backfill, show_emoji)
-                        .await
+                    sync::run_sync_posts(
+                        &self,
+                        *full,
+                        *max_pages,
+                        *delay,
+                        *no_backfill,
+                        max_storage.clone(),
+                        show_emoji,
+                    )
+                    .await
                 }
                 SyncAction::Backfill {
                     collection,
                     max_pages,
                     delay,
+                    max_storage,
                 } => {
                     let coll: Collection =
                         collection.parse().map_err(|e: String| anyhow::anyhow!(e))?;
-                    sync::run_backfill(&self, coll, *max_pages, *delay, show_emoji).await
+                    sync::run_backfill(
+                        &self,
+                        coll,
+                        *max_pages,
+                        *delay,
+                        max_storage.clone(),
+                        show_emoji,
+                    )
+                    .await
                 }
                 SyncAction::Status => sync::run_status(&self, show_emoji).await,
                 SyncAction::Reset { collection } => sync::run_reset(&self, collection).await,

@@ -50,6 +50,16 @@ pub trait TweetStore: Send + Sync {
 
     /// Get the count of tweets in a collection.
     async fn collection_count(&self, collection: &str, user_id: &str) -> Result<u64>;
+
+    /// Get tweets from a collection within a time range (by added_at timestamp).
+    async fn get_tweets_by_collection_time_range(
+        &self,
+        collection: &str,
+        user_id: &str,
+        start_time: chrono::DateTime<chrono::Utc>,
+        end_time: chrono::DateTime<chrono::Utc>,
+        limit: Option<u32>,
+    ) -> Result<Vec<TweetData>>;
 }
 
 /// Trait for storing sync state.

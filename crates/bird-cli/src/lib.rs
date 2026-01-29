@@ -13,9 +13,11 @@
 //! - `bird sync bookmarks` - Sync bookmarks to local database
 //! - `bird sync status` - Show sync state for all collections
 //! - `bird sync reset <collection>` - Reset sync state for a collection
+//! - `bird insights generate` - Analyze tweets for insights using LLM
 
 pub mod cli;
 pub mod commands;
+pub mod insights;
 pub mod output;
 pub mod storage_monitor;
 pub mod sync_engine;

@@ -1,6 +1,6 @@
 //! CLI interface for bird.
 
-use crate::commands::{bookmarks, config, db, likes, list, read, sync, whoami};
+use crate::commands::{bookmarks, config, db, insights, likes, list, read, sync, whoami};
 use bird_client::cookies::{check_available_sources, resolve_credentials};
 use bird_client::{Collection, TwitterClient, TwitterClientOptions};
 use bird_storage::{
@@ -28,7 +28,9 @@ use std::sync::Arc;
   bird db backfill-created-at    Backfill created_at_ts for existing tweets
   bird --config ~/.bird/config.toml sync likes
   bird config init               Create a default config file
-  bird sync status               Show sync state")]
+  bird sync status               Show sync state
+  bird insights generate         Analyze tweets for insights
+  bird insights generate week    Analyze tweets from the last week")]
 pub struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -220,6 +222,12 @@ enum Commands {
         #[command(subcommand)]
         action: ConfigAction,
     },
+
+    /// Generate insights from synced tweets using LLM analysis.
+    Insights {
+        #[command(subcommand)]
+        action: InsightsAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -351,6 +359,37 @@ enum ConfigAction {
     },
 }
 
+#[derive(Subcommand)]
+enum InsightsAction {
+    /// Generate insights from synced tweets.
+    Generate {
+        /// Time period to analyze (day, week, month). Default: week.
+        #[arg(default_value = "week")]
+        period: Option<String>,
+
+        /// Collection to analyze (all, likes, bookmarks). Default: all.
+        #[arg(long)]
+        collection: Option<String>,
+
+        /// Maximum number of tweets to analyze.
+        #[arg(long)]
+        max_tweets: Option<u32>,
+
+        /// LLM provider to use. Default: claude-code (uses MAX subscription).
+        /// Options: claude-code, anthropic-api
+        #[arg(long, default_value = "claude-code")]
+        provider: String,
+
+        /// LLM model to use (overrides BIRD_LLM_MODEL env var).
+        #[arg(long)]
+        model: Option<String>,
+
+        /// Show verbose output including model info.
+        #[arg(long, short)]
+        verbose: bool,
+    },
+}
+
 impl Cli {
     /// Run the CLI.
     pub async fn run(self) -> anyhow::Result<()> {
@@ -464,6 +503,28 @@ impl Cli {
             },
             Some(Commands::Config { action }) => match action {
                 ConfigAction::Init { force } => config::run_init(&self, *force, show_emoji).await,
+            },
+            Some(Commands::Insights { action }) => match action {
+                InsightsAction::Generate {
+                    period,
+                    collection,
+                    max_tweets,
+                    provider,
+                    model,
+                    verbose,
+                } => {
+                    insights::run_generate(
+                        &self,
+                        period.clone(),
+                        collection.clone(),
+                        *max_tweets,
+                        provider.clone(),
+                        model.clone(),
+                        *verbose,
+                        show_emoji,
+                    )
+                    .await
+                }
             },
             None => {
                 // Check for shorthand tweet ID

@@ -175,6 +175,19 @@ impl TweetStore for MemoryStorage {
             .map(|ids| ids.len() as u64)
             .unwrap_or(0))
     }
+
+    async fn get_tweets_by_collection_time_range(
+        &self,
+        collection: &str,
+        user_id: &str,
+        _start_time: chrono::DateTime<chrono::Utc>,
+        _end_time: chrono::DateTime<chrono::Utc>,
+        limit: Option<u32>,
+    ) -> Result<Vec<TweetData>> {
+        // Memory storage doesn't track added_at, so return all tweets in collection
+        self.get_tweets_by_collection(collection, user_id, limit, None)
+            .await
+    }
 }
 
 #[async_trait]

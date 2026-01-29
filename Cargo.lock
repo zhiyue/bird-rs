@@ -461,6 +461,7 @@ name = "bird-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bird-client",
  "bird-core",
  "bird-storage",
@@ -468,9 +469,11 @@ dependencies = [
  "clap",
  "colored",
  "dirs",
+ "reqwest",
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-test",
  "toml",

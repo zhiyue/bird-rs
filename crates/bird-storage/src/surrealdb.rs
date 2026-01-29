@@ -309,6 +309,10 @@ pub struct TimestampDebugInfo {
     pub min_ts: Option<i64>,
     pub max_ts: Option<i64>,
     pub distribution: Vec<(i64, u64)>,
+    /// Tweet ID with the oldest timestamp.
+    pub oldest_tweet_id: Option<String>,
+    /// Tweet ID with the newest timestamp.
+    pub newest_tweet_id: Option<String>,
 }
 
 impl SurrealDbStorage {
@@ -453,16 +457,12 @@ impl SurrealDbStorage {
     pub async fn debug_timestamp_distribution(&self) -> Result<TimestampDebugInfo> {
         // Count tweets with no created_at_ts field
         let none_count = self
-            .count_query(
-                "SELECT count() as count FROM tweet WHERE created_at_ts IS NONE GROUP ALL",
-            )
+            .count_query("SELECT count() as count FROM tweet WHERE created_at_ts IS NONE GROUP ALL")
             .await?;
 
         // Count tweets with created_at_ts = 0
         let zero_count = self
-            .count_query(
-                "SELECT count() as count FROM tweet WHERE created_at_ts = 0 GROUP ALL",
-            )
+            .count_query("SELECT count() as count FROM tweet WHERE created_at_ts = 0 GROUP ALL")
             .await?;
 
         // Count tweets with valid timestamps
@@ -541,7 +541,55 @@ impl SurrealDbStorage {
             .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse distribution: {e}")))?;
 
-        let distribution: Vec<(i64, u64)> = records.into_iter().map(|r| (r.created_at_ts, r.count)).collect();
+        let distribution: Vec<(i64, u64)> = records
+            .into_iter()
+            .map(|r| (r.created_at_ts, r.count))
+            .collect();
+
+        // Find tweet IDs for oldest and newest timestamps
+        let oldest_tweet_id = if let Some(ts) = min_ts {
+            let mut oldest_result = self
+                .db
+                .query("SELECT tweet_id FROM tweet WHERE created_at_ts = $ts LIMIT 1")
+                .bind(("ts", ts))
+                .await
+                .map_err(|e| Error::Storage(format!("Failed to fetch oldest tweet: {e}")))?;
+
+            #[derive(Deserialize)]
+            struct TweetIdRecord {
+                tweet_id: String,
+            }
+
+            let oldest_records: Vec<TweetIdRecord> = oldest_result
+                .take(0)
+                .map_err(|e| Error::Storage(format!("Failed to parse oldest tweet: {e}")))?;
+
+            oldest_records.into_iter().next().map(|r| r.tweet_id)
+        } else {
+            None
+        };
+
+        let newest_tweet_id = if let Some(ts) = max_ts {
+            let mut newest_result = self
+                .db
+                .query("SELECT tweet_id FROM tweet WHERE created_at_ts = $ts LIMIT 1")
+                .bind(("ts", ts))
+                .await
+                .map_err(|e| Error::Storage(format!("Failed to fetch newest tweet: {e}")))?;
+
+            #[derive(Deserialize)]
+            struct TweetIdRecord {
+                tweet_id: String,
+            }
+
+            let newest_records: Vec<TweetIdRecord> = newest_result
+                .take(0)
+                .map_err(|e| Error::Storage(format!("Failed to parse newest tweet: {e}")))?;
+
+            newest_records.into_iter().next().map(|r| r.tweet_id)
+        } else {
+            None
+        };
 
         Ok(TimestampDebugInfo {
             none_count,
@@ -551,6 +599,8 @@ impl SurrealDbStorage {
             min_ts,
             max_ts,
             distribution,
+            oldest_tweet_id,
+            newest_tweet_id,
         })
     }
 
@@ -674,6 +724,11 @@ impl SurrealDbStorage {
             .query("DEFINE INDEX IF NOT EXISTS tweet_collection_lookup ON tweet_collection FIELDS collection, user_id")
             .await
             .map_err(|e| Error::Storage(format!("Failed to create collection lookup index: {}", e)))?;
+
+        self.db
+            .query("DEFINE INDEX IF NOT EXISTS tweet_collection_added_at ON tweet_collection FIELDS collection, user_id, added_at")
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to create collection added_at index: {}", e)))?;
 
         self.db
             .query("DEFINE TABLE IF NOT EXISTS sync_state SCHEMALESS")
@@ -806,26 +861,59 @@ impl TweetStore for SurrealDbStorage {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<TweetData>> {
-        let limit = limit.unwrap_or(100);
-        let offset = offset.unwrap_or(0);
+        let limit = limit.unwrap_or(100) as usize;
+        let offset = offset.unwrap_or(0) as usize;
         let collection_owned = collection.to_string();
         let user_id_owned = user_id.to_string();
 
-        let mut tweet_result = self
+        // Step 1: Get tweet_ids from tweet_collection (fast, uses index)
+        let mut id_result = self
             .db
             .query(
-                "SELECT * FROM tweet
-                 WHERE tweet_id IN (
-                    SELECT tweet_id FROM tweet_collection
-                    WHERE collection = $collection AND user_id = $user_id
-                 )
-                 ORDER BY created_at_ts DESC
-                 LIMIT $limit START $offset",
+                "SELECT tweet_id, added_at FROM tweet_collection
+                 WHERE collection = $collection AND user_id = $user_id
+                 ORDER BY added_at DESC",
             )
             .bind(("collection", collection_owned))
             .bind(("user_id", user_id_owned))
-            .bind(("limit", limit))
-            .bind(("offset", offset))
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get tweet ids: {}", e)))?;
+
+        #[derive(Deserialize)]
+        struct TweetIdRecord {
+            tweet_id: String,
+        }
+
+        let id_records: Vec<TweetIdRecord> = id_result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse tweet ids: {}", e)))?;
+
+        if id_records.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Apply offset and limit
+        let tweet_ids: Vec<String> = id_records
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .map(|r| r.tweet_id)
+            .collect();
+
+        if tweet_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Step 2: Fetch tweets directly using record ID syntax (instant lookups)
+        let record_refs: Vec<String> = tweet_ids
+            .iter()
+            .map(|id| format!("tweet:⟨{}⟩", id))
+            .collect();
+        let query = format!("SELECT * FROM [{}]", record_refs.join(", "));
+
+        let mut tweet_result = self
+            .db
+            .query(&query)
             .await
             .map_err(|e| Error::Storage(format!("Failed to get tweets: {}", e)))?;
 
@@ -833,10 +921,19 @@ impl TweetStore for SurrealDbStorage {
             .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse tweets: {}", e)))?;
 
-        // Convert to TweetData (already sorted by query)
-        let ordered_tweets: Vec<TweetData> = records
+        // Build a map for ordering
+        let tweet_map: std::collections::HashMap<String, TweetData> = records
             .into_iter()
-            .filter_map(|r| r.try_into().ok())
+            .filter_map(|r| {
+                let id = r.tweet_id.clone();
+                r.try_into().ok().map(|t: TweetData| (id, t))
+            })
+            .collect();
+
+        // Return tweets in the order from tweet_collection (by added_at DESC)
+        let ordered_tweets: Vec<TweetData> = tweet_ids
+            .into_iter()
+            .filter_map(|id| tweet_map.get(&id).cloned())
             .collect();
 
         Ok(ordered_tweets)
@@ -949,6 +1046,19 @@ impl TweetStore for SurrealDbStorage {
             .map_err(|e| Error::Storage(format!("Failed to parse count: {}", e)))?;
 
         Ok(records.first().map(|r| r.count).unwrap_or(0))
+    }
+
+    async fn get_tweets_by_collection_time_range(
+        &self,
+        collection: &str,
+        user_id: &str,
+        _start_time: DateTime<Utc>,
+        _end_time: DateTime<Utc>,
+        limit: Option<u32>,
+    ) -> Result<Vec<TweetData>> {
+        // For now, just return the most recent tweets (time filtering TODO)
+        self.get_tweets_by_collection(collection, user_id, limit, None)
+            .await
     }
 }
 

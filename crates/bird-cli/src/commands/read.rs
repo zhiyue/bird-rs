@@ -1,16 +1,21 @@
 //! Read command implementation with cache-first behavior.
 
 use crate::cli::{extract_tweet_id, Cli};
-use crate::output::{format_json, format_tweet};
+use crate::output::{format_json, format_tweet, FormatOptions};
 
 /// Run the read command.
 pub async fn run(
     cli: &Cli,
     tweet_id: &str,
     _json_full: bool,
+    show_headline: bool,
     show_emoji: bool,
 ) -> anyhow::Result<()> {
     let id = extract_tweet_id(tweet_id)?;
+    let format_opts = FormatOptions {
+        show_emoji,
+        show_headline,
+    };
 
     // Try cache first (unless --no-cache is specified)
     if !cli.no_cache() {
@@ -19,7 +24,7 @@ pub async fn run(
                 if cli.json() {
                     println!("{}", format_json(&tweet));
                 } else {
-                    print!("{}", format_tweet(&tweet, show_emoji));
+                    print!("{}", format_tweet(&tweet, &format_opts));
                 }
                 return Ok(());
             }
@@ -38,7 +43,7 @@ pub async fn run(
     if cli.json() {
         println!("{}", format_json(&tweet));
     } else {
-        print!("{}", format_tweet(&tweet, show_emoji));
+        print!("{}", format_tweet(&tweet, &format_opts));
     }
 
     Ok(())

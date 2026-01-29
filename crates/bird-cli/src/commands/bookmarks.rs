@@ -1,7 +1,7 @@
 //! Bookmarks command implementation.
 
 use crate::cli::Cli;
-use crate::output::{format_json, format_pagination_summary, format_tweets};
+use crate::output::{format_json, format_pagination_summary, format_tweets, FormatOptions};
 use bird_client::PaginationOptions;
 
 /// Run the bookmarks command.
@@ -40,7 +40,11 @@ pub async fn run(
     } else if result.items.is_empty() {
         println!("No bookmarks found.");
     } else {
-        print!("{}", format_tweets(&result.items, show_emoji));
+        let opts = FormatOptions {
+            show_emoji,
+            show_headline: false,
+        };
+        print!("{}", format_tweets(&result.items, &opts));
         println!();
         println!(
             "{}",

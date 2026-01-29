@@ -3,8 +3,17 @@
 use bird_client::{CurrentUser, MediaType, TweetData, TwitterUser};
 use colored::Colorize;
 
+/// Options for formatting output.
+#[derive(Debug, Clone, Default)]
+pub struct FormatOptions {
+    /// Whether to show emoji in output.
+    pub show_emoji: bool,
+    /// Whether to show LLM-generated headlines for long tweets.
+    pub show_headline: bool,
+}
+
 /// Format a tweet for text output.
-pub fn format_tweet(tweet: &TweetData, show_emoji: bool) -> String {
+pub fn format_tweet(tweet: &TweetData, opts: &FormatOptions) -> String {
     let mut output = String::new();
 
     // Header: author
@@ -15,6 +24,18 @@ pub fn format_tweet(tweet: &TweetData, show_emoji: bool) -> String {
     );
     output.push_str(&author_line);
     output.push('\n');
+
+    // Show headline if available and requested
+    if opts.show_headline {
+        if let Some(ref headline) = tweet.headline {
+            let icon = if opts.show_emoji { "📝 " } else { "" };
+            output.push_str(&format!(
+                "{}Headline: {}\n",
+                icon,
+                headline.italic().yellow()
+            ));
+        }
+    }
 
     // Tweet text
     output.push_str(&tweet.text);
@@ -28,7 +49,7 @@ pub fn format_tweet(tweet: &TweetData, show_emoji: bool) -> String {
     }
 
     if let Some(reply_count) = tweet.reply_count {
-        let icon = if show_emoji { "💬 " } else { "" };
+        let icon = if opts.show_emoji { "💬 " } else { "" };
         meta_parts.push(
             format!("{}{} replies", icon, reply_count)
                 .dimmed()
@@ -37,7 +58,7 @@ pub fn format_tweet(tweet: &TweetData, show_emoji: bool) -> String {
     }
 
     if let Some(retweet_count) = tweet.retweet_count {
-        let icon = if show_emoji { "🔁 " } else { "" };
+        let icon = if opts.show_emoji { "🔁 " } else { "" };
         meta_parts.push(
             format!("{}{} retweets", icon, retweet_count)
                 .dimmed()
@@ -46,7 +67,7 @@ pub fn format_tweet(tweet: &TweetData, show_emoji: bool) -> String {
     }
 
     if let Some(like_count) = tweet.like_count {
-        let icon = if show_emoji { "❤️ " } else { "" };
+        let icon = if opts.show_emoji { "❤️ " } else { "" };
         meta_parts.push(format!("{}{} likes", icon, like_count).dimmed().to_string());
     }
 
@@ -58,7 +79,7 @@ pub fn format_tweet(tweet: &TweetData, show_emoji: bool) -> String {
     // Media attachments
     if let Some(media) = &tweet.media {
         for m in media {
-            let icon = if show_emoji {
+            let icon = if opts.show_emoji {
                 match m.media_type {
                     MediaType::Photo => "📷 ",
                     MediaType::Video => "🎬 ",
@@ -73,7 +94,7 @@ pub fn format_tweet(tweet: &TweetData, show_emoji: bool) -> String {
 
     // Article
     if let Some(article) = &tweet.article {
-        let icon = if show_emoji { "📰 " } else { "" };
+        let icon = if opts.show_emoji { "📰 " } else { "" };
         output.push_str(&format!("{}Article: {}\n", icon, article.title.bold()));
         if let Some(preview) = &article.preview_text {
             output.push_str(&format!("  {}\n", preview.dimmed()));
@@ -85,7 +106,7 @@ pub fn format_tweet(tweet: &TweetData, show_emoji: bool) -> String {
         output.push('\n');
         output.push_str(&"┌─ Quoted Tweet ─".dimmed().to_string());
         output.push('\n');
-        for line in format_tweet(quoted, show_emoji).lines() {
+        for line in format_tweet(quoted, opts).lines() {
             output.push_str(&format!("│ {}\n", line));
         }
         output.push_str(&"└────────────────".dimmed().to_string());
@@ -164,7 +185,7 @@ pub fn format_user(user: &TwitterUser, show_emoji: bool) -> String {
 }
 
 /// Format a list of tweets for text output.
-pub fn format_tweets(tweets: &[TweetData], show_emoji: bool) -> String {
+pub fn format_tweets(tweets: &[TweetData], opts: &FormatOptions) -> String {
     let mut output = String::new();
 
     for (i, tweet) in tweets.iter().enumerate() {
@@ -172,7 +193,7 @@ pub fn format_tweets(tweets: &[TweetData], show_emoji: bool) -> String {
             output.push_str(&"─".repeat(40).dimmed().to_string());
             output.push('\n');
         }
-        output.push_str(&format_tweet(tweet, show_emoji));
+        output.push_str(&format_tweet(tweet, opts));
     }
 
     output

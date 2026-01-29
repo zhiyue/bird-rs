@@ -14,6 +14,7 @@ pub async fn run(
     collection: &str,
     page: u32,
     page_size: Option<u32>,
+    show_headline: bool,
     show_emoji: bool,
 ) -> anyhow::Result<()> {
     let storage = cli.create_storage().await?;
@@ -53,11 +54,11 @@ pub async fn run(
     }
 
     // Print table header
-    print_table_header(show_emoji);
+    print_table_header(show_headline, show_emoji);
 
     // Print each tweet as a row
     for tweet in &tweets {
-        print_tweet_row(tweet, show_emoji);
+        print_tweet_row(tweet, show_headline, show_emoji);
     }
 
     // Print pagination info
@@ -84,43 +85,87 @@ pub async fn run(
 }
 
 /// Print the table header.
-fn print_table_header(show_emoji: bool) {
+fn print_table_header(show_headline: bool, show_emoji: bool) {
     let id_header = "ID";
     let text_header = "Text";
     let time_header = "Time";
 
     let icon = if show_emoji { "📋 " } else { "" };
-    println!(
-        "{}{:<20} {:<50} {}",
-        icon,
-        id_header.bold(),
-        text_header.bold(),
-        time_header.bold()
-    );
-    println!("{}", "─".repeat(90).dimmed());
+    if show_headline {
+        println!(
+            "{}{:<20} {:<40} {:<30} {}",
+            icon,
+            id_header.bold(),
+            text_header.bold(),
+            "Headline".bold(),
+            time_header.bold()
+        );
+        println!("{}", "─".repeat(110).dimmed());
+    } else {
+        println!(
+            "{}{:<20} {:<50} {}",
+            icon,
+            id_header.bold(),
+            text_header.bold(),
+            time_header.bold()
+        );
+        println!("{}", "─".repeat(90).dimmed());
+    }
 }
 
 /// Print a single tweet as a table row.
-fn print_tweet_row(tweet: &TweetData, _show_emoji: bool) {
+fn print_tweet_row(tweet: &TweetData, show_headline: bool, _show_emoji: bool) {
     let id = &tweet.id;
-
-    // Truncate text to 47 chars + "..."
-    let text = tweet.text.replace('\n', " ");
-    let truncated_text = if text.len() > 47 {
-        format!("{}...", &text[..47])
-    } else {
-        text
-    };
 
     // Format timestamp
     let time_str = format_timestamp(&tweet.created_at);
 
-    println!(
-        "{:<20} {:<50} {}",
-        id.cyan(),
-        truncated_text,
-        time_str.dimmed()
-    );
+    if show_headline {
+        // Truncate text to 37 chars + "..."
+        let text = tweet.text.replace('\n', " ");
+        let truncated_text = if text.len() > 37 {
+            format!("{}...", &text[..37])
+        } else {
+            text
+        };
+
+        // Format headline (truncate to 27 chars + "...")
+        let headline = tweet
+            .headline
+            .as_ref()
+            .map(|h| {
+                let h = h.replace('\n', " ");
+                if h.len() > 27 {
+                    format!("{}...", &h[..27])
+                } else {
+                    h
+                }
+            })
+            .unwrap_or_else(|| "-".to_string());
+
+        println!(
+            "{:<20} {:<40} {:<30} {}",
+            id.cyan(),
+            truncated_text,
+            headline.yellow(),
+            time_str.dimmed()
+        );
+    } else {
+        // Truncate text to 47 chars + "..."
+        let text = tweet.text.replace('\n', " ");
+        let truncated_text = if text.len() > 47 {
+            format!("{}...", &text[..47])
+        } else {
+            text
+        };
+
+        println!(
+            "{:<20} {:<50} {}",
+            id.cyan(),
+            truncated_text,
+            time_str.dimmed()
+        );
+    }
 }
 
 /// Format a Twitter timestamp to human-readable format (e.g., "2026/01/28 7:44am").

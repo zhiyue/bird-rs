@@ -158,6 +158,10 @@ enum Commands {
         /// Include raw API response in output.
         #[arg(long)]
         json_full: bool,
+
+        /// Show LLM-generated headline for long tweets.
+        #[arg(long)]
+        show_headline: bool,
     },
 
     /// Fetch your liked tweets.
@@ -203,6 +207,10 @@ enum Commands {
         /// Number of tweets per page.
         #[arg(long)]
         page_size: Option<u32>,
+
+        /// Show LLM-generated headlines for long tweets.
+        #[arg(long)]
+        show_headline: bool,
     },
 
     /// Sync tweets to local database.
@@ -425,7 +433,8 @@ impl Cli {
             Some(Commands::Read {
                 tweet_id,
                 json_full,
-            }) => read::run(&self, tweet_id, *json_full, show_emoji).await,
+                show_headline,
+            }) => read::run(&self, tweet_id, *json_full, *show_headline, show_emoji).await,
             Some(Commands::Likes {
                 all,
                 max_pages,
@@ -440,7 +449,8 @@ impl Cli {
                 collection,
                 page,
                 page_size,
-            }) => list::run(&self, collection, *page, *page_size, show_emoji).await,
+                show_headline,
+            }) => list::run(&self, collection, *page, *page_size, *show_headline, show_emoji).await,
             Some(Commands::Sync { action }) => match action {
                 SyncAction::Likes {
                     full,
@@ -570,7 +580,7 @@ impl Cli {
             None => {
                 // Check for shorthand tweet ID
                 if let Some(tweet_id) = &self.tweet_id {
-                    return read::run(&self, tweet_id, false, show_emoji).await;
+                    return read::run(&self, tweet_id, false, false, show_emoji).await;
                 }
 
                 // No command provided, show help

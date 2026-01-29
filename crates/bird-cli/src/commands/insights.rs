@@ -60,9 +60,8 @@ pub async fn run_generate(
         .map_err(|e: String| anyhow::anyhow!(e))?;
 
     // Parse provider choice
-    let provider_choice: LlmProviderChoice = provider
-        .parse()
-        .map_err(|e: String| anyhow::anyhow!(e))?;
+    let provider_choice: LlmProviderChoice =
+        provider.parse().map_err(|e: String| anyhow::anyhow!(e))?;
 
     // Get model override from env if not specified
     let model = model.or_else(|| std::env::var("BIRD_LLM_MODEL").ok());
@@ -80,9 +79,7 @@ pub async fn run_generate(
             }
             Box::new(ClaudeCodeProvider::new(model))
         }
-        LlmProviderChoice::AnthropicApi => {
-            Box::new(AnthropicProvider::from_env(model)?)
-        }
+        LlmProviderChoice::AnthropicApi => Box::new(AnthropicProvider::from_env(model)?),
     };
 
     // Get storage and user ID

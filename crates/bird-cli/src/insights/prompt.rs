@@ -63,7 +63,11 @@ pub fn build_user_prompt(tweets: &[TweetData], period_description: &str) -> Stri
     );
 
     for (i, tweet) in tweets.iter().enumerate() {
-        prompt.push_str(&format!("---\nTweet {}:\n@{}: ", i + 1, tweet.author.username));
+        prompt.push_str(&format!(
+            "---\nTweet {}:\n@{}: ",
+            i + 1,
+            tweet.author.username
+        ));
 
         // Format tweet text based on whether it has a headline
         prompt.push_str(&format_tweet_text(tweet));

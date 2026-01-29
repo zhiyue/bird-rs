@@ -56,6 +56,28 @@ bird list likes --page-size 50 # Custom page size
 bird list likes --json         # JSON output
 ```
 
+### Insights (LLM Analysis)
+
+```bash
+bird insights generate         # Analyze tweets from last week
+bird insights generate day     # Last day
+bird insights generate month   # Last month
+bird insights generate --collection likes
+bird insights generate --max-tweets 50
+bird insights generate -v      # Verbose output
+```
+
+### Database Maintenance
+
+```bash
+bird db status                 # Show database stats
+bird db status --debug         # Include timestamp distribution
+bird db optimize               # Ensure schema/indexes exist
+bird db backfill-created-at    # Backfill timestamps
+bird db backfill-headlines     # Generate headlines for long tweets
+bird db backfill-headlines --max-tweets 100
+```
+
 ## Options
 
 | Flag          | Description                     |

@@ -251,13 +251,8 @@ impl InsightsEngine {
                         eprintln!("  Generated {} headlines", headlines.len());
 
                         // Store headlines in the database
-                        let headline_pairs: Vec<(String, String)> =
-                            headlines.into_iter().collect();
-                        if let Err(e) = self
-                            .storage
-                            .update_tweet_headlines(&headline_pairs)
-                            .await
-                        {
+                        let headline_pairs: Vec<(String, String)> = headlines.into_iter().collect();
+                        if let Err(e) = self.storage.update_tweet_headlines(&headline_pairs).await {
                             eprintln!("  Warning: Failed to cache headlines: {}", e);
                         }
 

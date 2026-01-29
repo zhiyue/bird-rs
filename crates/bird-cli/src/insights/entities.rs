@@ -148,4 +148,3 @@ pub struct InsightsResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub themes: Vec<String>,
 }
-

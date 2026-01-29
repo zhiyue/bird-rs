@@ -40,9 +40,11 @@ bird sync likes
 | `bird sync bookmarks` | Sync bookmarks to local DB    |
 | `bird sync posts`     | Sync your own tweets to DB    |
 | `bird sync status`    | Show sync progress            |
-| `bird db backfill-created-at` | Backfill created_at_ts for stored tweets |
+| `bird insights generate` | Analyze tweets with LLM    |
 | `bird db status`      | Show database status and counts |
 | `bird db optimize`    | Ensure schema and indexes exist |
+| `bird db backfill-created-at` | Backfill timestamps for stored tweets |
+| `bird db backfill-headlines` | Generate headlines for long tweets |
 | `bird config init`    | Write a default config file   |
 
 ## Sync
@@ -65,6 +67,41 @@ bird sync status
 
 The sync is **forward-only by default**: it catches up on new items, and you can
 explicitly backfill older history over multiple sessions.
+
+## Insights
+
+Bird can analyze your synced tweets using an LLM to extract tools, topics,
+concepts, people, and resources you've been exploring.
+
+```bash
+# Analyze tweets from the last week (default)
+bird insights generate
+
+# Analyze different time periods
+bird insights generate day
+bird insights generate week
+bird insights generate month
+
+# Filter by collection
+bird insights generate --collection likes
+bird insights generate --collection bookmarks
+
+# Limit tweets analyzed
+bird insights generate --max-tweets 50
+
+# Show verbose output
+bird insights generate -v
+```
+
+The insights command uses Claude Code by default (requires the `claude` CLI).
+Long tweets (>200 chars) automatically get LLM-generated headlines for more
+efficient analysis; these are cached in the database for reuse.
+
+To backfill headlines for existing tweets:
+
+```bash
+bird db backfill-headlines --max-tweets 100
+```
 
 ## Storage
 

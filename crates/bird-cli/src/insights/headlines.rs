@@ -134,10 +134,7 @@ fn parse_headline_response(
     // Validate that we got headlines for all tweets
     for tweet in tweets {
         if !headlines.contains_key(&tweet.id) {
-            eprintln!(
-                "  Warning: No headline generated for tweet {}",
-                tweet.id
-            );
+            eprintln!("  Warning: No headline generated for tweet {}", tweet.id);
         }
     }
 

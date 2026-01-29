@@ -5,11 +5,7 @@ use super::TimePeriod;
 use colored::Colorize;
 
 /// Format insights for terminal output.
-pub fn format_insights(
-    result: &InsightsResult,
-    period: TimePeriod,
-    show_emoji: bool,
-) -> String {
+pub fn format_insights(result: &InsightsResult, period: TimePeriod, show_emoji: bool) -> String {
     let mut output = String::new();
 
     // Header

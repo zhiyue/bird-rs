@@ -42,10 +42,7 @@ impl LlmProvider for ClaudeCodeProvider {
         let prompt = if request.system.is_empty() {
             request.user
         } else {
-            format!(
-                "{}\n\n---\n\n{}",
-                request.system, request.user
-            )
+            format!("{}\n\n---\n\n{}", request.system, request.user)
         };
 
         // Invoke claude CLI in print mode from /tmp to avoid loading project context
@@ -82,7 +79,7 @@ impl LlmProvider for ClaudeCodeProvider {
         Ok(LlmResponse {
             content,
             model: self.model.clone(),
-            input_tokens: None,  // Claude CLI doesn't report tokens
+            input_tokens: None, // Claude CLI doesn't report tokens
             output_tokens: None,
         })
     }

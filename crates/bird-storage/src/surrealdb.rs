@@ -2,8 +2,8 @@
 
 use async_trait::async_trait;
 use bird_core::{
-    Error, MentionedUser, Result, SyncState, SyncStateStore, TweetAuthor, TweetData, TweetStore,
-    UserStore,
+    Error, MentionedUser, ResonanceScore, ResonanceStore, Result, SyncState, SyncStateStore,
+    TweetAuthor, TweetData, TweetStore, UserStore,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -756,6 +756,28 @@ impl SurrealDbStorage {
             .await
             .map_err(|e| Error::Storage(format!("Failed to create twitter_user username index: {}", e)))?;
 
+        // Index for finding replies by in_reply_to_status_id
+        self.db
+            .query("DEFINE INDEX IF NOT EXISTS tweet_reply_to ON tweet FIELDS in_reply_to_status_id")
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to create tweet reply_to index: {}", e)))?;
+
+        // Resonance score table and indexes
+        self.db
+            .query("DEFINE TABLE IF NOT EXISTS resonance_score SCHEMALESS")
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to create resonance_score table: {}", e)))?;
+
+        self.db
+            .query("DEFINE INDEX IF NOT EXISTS resonance_score_pk ON resonance_score FIELDS tweet_id, user_id UNIQUE")
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to create resonance_score pk index: {}", e)))?;
+
+        self.db
+            .query("DEFINE INDEX IF NOT EXISTS resonance_score_lookup ON resonance_score FIELDS user_id")
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to create resonance_score lookup index: {}", e)))?;
+
         Ok(())
     }
 }
@@ -1111,6 +1133,202 @@ impl TweetStore for SurrealDbStorage {
 
         Ok(updated)
     }
+
+    async fn get_tweets_by_ids(&self, ids: &[&str]) -> Result<Vec<TweetData>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Build record ID references for SurrealDB (tweet:id format)
+        let record_refs: Vec<String> = ids.iter().map(|id| format!("tweet:⟨{}⟩", id)).collect();
+        let query = format!("SELECT * FROM [{}]", record_refs.join(", "));
+
+        let mut result = self
+            .db
+            .query(&query)
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get tweets by ids: {}", e)))?;
+
+        let records: Vec<TweetRecord> = result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse tweets: {}", e)))?;
+
+        records.into_iter().map(|r| r.try_into()).collect()
+    }
+
+    async fn get_collection_tweet_ids(
+        &self,
+        collection: &str,
+        user_id: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<String>> {
+        let collection_owned = collection.to_string();
+        let user_id_owned = user_id.to_string();
+
+        let query = if let Some(limit) = limit {
+            format!(
+                "SELECT tweet_id, added_at FROM tweet_collection WHERE collection = $collection AND user_id = $user_id ORDER BY added_at DESC LIMIT {}",
+                limit
+            )
+        } else {
+            "SELECT tweet_id, added_at FROM tweet_collection WHERE collection = $collection AND user_id = $user_id ORDER BY added_at DESC".to_string()
+        };
+
+        let mut result = self
+            .db
+            .query(&query)
+            .bind(("collection", collection_owned))
+            .bind(("user_id", user_id_owned))
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get collection tweet ids: {}", e)))?;
+
+        #[derive(Deserialize)]
+        struct TweetIdRecord {
+            tweet_id: String,
+        }
+
+        let records: Vec<TweetIdRecord> = result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse tweet ids: {}", e)))?;
+
+        Ok(records.into_iter().map(|r| r.tweet_id).collect())
+    }
+
+    async fn get_user_reply_tweets(
+        &self,
+        user_id: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<(String, String)>> {
+        // Get tweets from user_tweets collection that have in_reply_to_status_id
+        let user_id_owned = user_id.to_string();
+        let limit = limit.unwrap_or(1000);
+
+        // First get tweet IDs from user_tweets collection
+        let mut id_result = self
+            .db
+            .query(
+                "SELECT tweet_id FROM tweet_collection WHERE collection = 'user_tweets' AND user_id = $user_id LIMIT $limit",
+            )
+            .bind(("user_id", user_id_owned.clone()))
+            .bind(("limit", limit))
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get user tweet ids: {}", e)))?;
+
+        #[derive(Deserialize)]
+        struct TweetIdRecord {
+            tweet_id: String,
+        }
+
+        let id_records: Vec<TweetIdRecord> = id_result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse tweet ids: {}", e)))?;
+
+        if id_records.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Fetch only the fields we need from these tweets
+        let record_refs: Vec<String> = id_records
+            .iter()
+            .map(|r| format!("tweet:⟨{}⟩", r.tweet_id))
+            .collect();
+        let query = format!(
+            "SELECT tweet_id, in_reply_to_status_id FROM [{}] WHERE in_reply_to_status_id IS NOT NONE",
+            record_refs.join(", ")
+        );
+
+        let mut result = self
+            .db
+            .query(&query)
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get reply tweets: {}", e)))?;
+
+        #[derive(Deserialize)]
+        struct ReplyRecord {
+            tweet_id: String,
+            in_reply_to_status_id: String,
+        }
+
+        let records: Vec<ReplyRecord> = result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse reply records: {}", e)))?;
+
+        Ok(records
+            .into_iter()
+            .map(|r| (r.tweet_id, r.in_reply_to_status_id))
+            .collect())
+    }
+
+    async fn get_user_quote_tweets(
+        &self,
+        user_id: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<(String, String)>> {
+        // Get tweets from user_tweets collection that have quoted_tweet
+        let user_id_owned = user_id.to_string();
+        let limit = limit.unwrap_or(1000);
+
+        // First get tweet IDs from user_tweets collection
+        let mut id_result = self
+            .db
+            .query(
+                "SELECT tweet_id FROM tweet_collection WHERE collection = 'user_tweets' AND user_id = $user_id LIMIT $limit",
+            )
+            .bind(("user_id", user_id_owned.clone()))
+            .bind(("limit", limit))
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get user tweet ids: {}", e)))?;
+
+        #[derive(Deserialize)]
+        struct TweetIdRecord {
+            tweet_id: String,
+        }
+
+        let id_records: Vec<TweetIdRecord> = id_result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse tweet ids: {}", e)))?;
+
+        if id_records.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Fetch only the fields we need from these tweets
+        let record_refs: Vec<String> = id_records
+            .iter()
+            .map(|r| format!("tweet:⟨{}⟩", r.tweet_id))
+            .collect();
+        let query = format!(
+            "SELECT tweet_id, quoted_tweet FROM [{}] WHERE quoted_tweet IS NOT NONE",
+            record_refs.join(", ")
+        );
+
+        let mut result = self
+            .db
+            .query(&query)
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get quote tweets: {}", e)))?;
+
+        #[derive(Deserialize)]
+        struct QuoteRecord {
+            tweet_id: String,
+            quoted_tweet: serde_json::Value,
+        }
+
+        let records: Vec<QuoteRecord> = result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse quote records: {}", e)))?;
+
+        // Extract the quoted tweet ID from the JSON
+        Ok(records
+            .into_iter()
+            .filter_map(|r| {
+                r.quoted_tweet
+                    .get("id")
+                    .and_then(|id| id.as_str())
+                    .map(|id| (r.tweet_id, id.to_string()))
+            })
+            .collect())
+    }
 }
 
 #[async_trait]
@@ -1189,6 +1407,25 @@ impl SyncStateStore for SurrealDbStorage {
             .map_err(|e| Error::Storage(format!("Failed to parse sync states: {}", e)))?;
 
         Ok(records.into_iter().map(|r| r.into()).collect())
+    }
+
+    async fn get_any_synced_user_id(&self) -> Result<Option<String>> {
+        let mut result = self
+            .db
+            .query("SELECT user_id FROM sync_state LIMIT 1")
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get user_id: {}", e)))?;
+
+        #[derive(Deserialize)]
+        struct UserIdRecord {
+            user_id: String,
+        }
+
+        let records: Vec<UserIdRecord> = result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse user_id: {}", e)))?;
+
+        Ok(records.into_iter().next().map(|r| r.user_id))
     }
 }
 
@@ -1318,5 +1555,194 @@ impl UserStore for SurrealDbStorage {
             .map_err(|e| Error::Storage(format!("Failed to parse tweets: {}", e)))?;
 
         records.into_iter().map(|r| r.try_into()).collect()
+    }
+}
+
+/// Resonance score record for SurrealDB storage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ResonanceScoreRecord {
+    tweet_id: String,
+    user_id: String,
+    total: f64,
+    liked: bool,
+    bookmarked: bool,
+    reply_count: u32,
+    quote_count: u32,
+    computed_at: DateTime<Utc>,
+}
+
+impl From<&ResonanceScore> for ResonanceScoreRecord {
+    fn from(score: &ResonanceScore) -> Self {
+        Self {
+            tweet_id: score.tweet_id.clone(),
+            user_id: score.user_id.clone(),
+            total: score.total,
+            liked: score.liked,
+            bookmarked: score.bookmarked,
+            reply_count: score.reply_count,
+            quote_count: score.quote_count,
+            computed_at: score.computed_at,
+        }
+    }
+}
+
+impl From<ResonanceScoreRecord> for ResonanceScore {
+    fn from(record: ResonanceScoreRecord) -> Self {
+        Self {
+            tweet_id: record.tweet_id,
+            user_id: record.user_id,
+            total: record.total,
+            liked: record.liked,
+            bookmarked: record.bookmarked,
+            reply_count: record.reply_count,
+            quote_count: record.quote_count,
+            computed_at: record.computed_at,
+        }
+    }
+}
+
+#[async_trait]
+impl ResonanceStore for SurrealDbStorage {
+    async fn get_resonance_score(
+        &self,
+        tweet_id: &str,
+        user_id: &str,
+    ) -> Result<Option<ResonanceScore>> {
+        let tweet_id_owned = tweet_id.to_string();
+        let user_id_owned = user_id.to_string();
+
+        let mut result = self
+            .db
+            .query(
+                "SELECT * FROM resonance_score
+                 WHERE tweet_id = $tweet_id AND user_id = $user_id
+                 LIMIT 1",
+            )
+            .bind(("tweet_id", tweet_id_owned))
+            .bind(("user_id", user_id_owned))
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get resonance score: {}", e)))?;
+
+        let records: Vec<ResonanceScoreRecord> = result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse resonance score: {}", e)))?;
+
+        Ok(records.into_iter().next().map(|r| r.into()))
+    }
+
+    async fn get_top_resonance_scores(
+        &self,
+        user_id: &str,
+        limit: u32,
+        offset: Option<u32>,
+    ) -> Result<Vec<ResonanceScore>> {
+        let user_id_owned = user_id.to_string();
+        let offset = offset.unwrap_or(0);
+
+        let mut result = self
+            .db
+            .query(
+                "SELECT * FROM resonance_score
+                 WHERE user_id = $user_id
+                 ORDER BY total DESC
+                 LIMIT $limit START $offset",
+            )
+            .bind(("user_id", user_id_owned))
+            .bind(("limit", limit))
+            .bind(("offset", offset))
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get top resonance scores: {}", e)))?;
+
+        let records: Vec<ResonanceScoreRecord> = result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse resonance scores: {}", e)))?;
+
+        Ok(records.into_iter().map(|r| r.into()).collect())
+    }
+
+    async fn upsert_resonance_score(&self, score: &ResonanceScore) -> Result<()> {
+        let record = ResonanceScoreRecord::from(score);
+
+        let json_content = serde_json::to_value(&record)
+            .map_err(|e| Error::Storage(format!("Failed to serialize resonance score: {}", e)))?;
+
+        // Check if exists
+        let exists = self
+            .get_resonance_score(&score.tweet_id, &score.user_id)
+            .await?
+            .is_some();
+
+        if exists {
+            // Update existing record
+            self.db
+                .query(
+                    "UPDATE resonance_score CONTENT $content
+                     WHERE tweet_id = $tweet_id AND user_id = $user_id",
+                )
+                .bind(("content", json_content))
+                .bind(("tweet_id", score.tweet_id.clone()))
+                .bind(("user_id", score.user_id.clone()))
+                .await
+                .map_err(|e| Error::Storage(format!("Failed to update resonance score: {}", e)))?;
+        } else {
+            // Insert new record
+            self.db
+                .query("CREATE resonance_score CONTENT $content")
+                .bind(("content", json_content))
+                .await
+                .map_err(|e| Error::Storage(format!("Failed to create resonance score: {}", e)))?;
+        }
+
+        Ok(())
+    }
+
+    async fn upsert_resonance_scores(&self, scores: &[ResonanceScore]) -> Result<usize> {
+        let mut count = 0;
+        for score in scores {
+            self.upsert_resonance_score(score).await?;
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    async fn clear_resonance_scores(&self, user_id: &str) -> Result<u64> {
+        let user_id_owned = user_id.to_string();
+
+        // Get count before deleting
+        let count = self.resonance_score_count(user_id).await?;
+
+        self.db
+            .query("DELETE FROM resonance_score WHERE user_id = $user_id")
+            .bind(("user_id", user_id_owned))
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to clear resonance scores: {}", e)))?;
+
+        Ok(count)
+    }
+
+    async fn resonance_score_count(&self, user_id: &str) -> Result<u64> {
+        let user_id_owned = user_id.to_string();
+
+        let mut result = self
+            .db
+            .query(
+                "SELECT count() as count FROM resonance_score
+                 WHERE user_id = $user_id
+                 GROUP ALL",
+            )
+            .bind(("user_id", user_id_owned))
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to count resonance scores: {}", e)))?;
+
+        #[derive(Deserialize)]
+        struct CountResult {
+            count: u64,
+        }
+
+        let records: Vec<CountResult> = result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse count: {}", e)))?;
+
+        Ok(records.first().map(|r| r.count).unwrap_or(0))
     }
 }

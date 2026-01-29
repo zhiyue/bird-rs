@@ -1,6 +1,6 @@
 //! CLI interface for bird.
 
-use crate::commands::{bookmarks, config, db, insights, likes, list, read, sync, whoami};
+use crate::commands::{bookmarks, config, db, insights, likes, list, read, resonance, sync, whoami};
 use bird_client::cookies::{check_available_sources, resolve_credentials};
 use bird_client::{Collection, TwitterClient, TwitterClientOptions};
 use bird_storage::{
@@ -211,6 +211,12 @@ enum Commands {
         /// Show LLM-generated headlines for long tweets.
         #[arg(long)]
         show_headline: bool,
+
+        /// Columns to display (comma-separated).
+        /// Available: id, text, time, author, liked, bookmarked, score, headline.
+        /// Default: id,text,time
+        #[arg(long, value_delimiter = ',')]
+        columns: Option<Vec<String>>,
     },
 
     /// Sync tweets to local database.
@@ -235,6 +241,12 @@ enum Commands {
     Insights {
         #[command(subcommand)]
         action: InsightsAction,
+    },
+
+    /// Track which tweets resonated most with you.
+    Resonance {
+        #[command(subcommand)]
+        action: ResonanceAction,
     },
 }
 
@@ -421,6 +433,19 @@ enum InsightsAction {
     },
 }
 
+#[derive(Subcommand)]
+enum ResonanceAction {
+    /// Recompute all resonance scores from current data.
+    ///
+    /// Analyzes your likes, bookmarks, replies, and quotes to calculate
+    /// resonance scores. Use `bird list --columns score` to see them.
+    Refresh {
+        /// Maximum interactions per collection to analyze (default: 5000).
+        #[arg(long)]
+        max_per_collection: Option<u32>,
+    },
+}
+
 impl Cli {
     /// Run the CLI.
     pub async fn run(self) -> anyhow::Result<()> {
@@ -450,7 +475,19 @@ impl Cli {
                 page,
                 page_size,
                 show_headline,
-            }) => list::run(&self, collection, *page, *page_size, *show_headline, show_emoji).await,
+                columns,
+            }) => {
+                list::run(
+                    &self,
+                    collection,
+                    *page,
+                    *page_size,
+                    *show_headline,
+                    columns.clone(),
+                    show_emoji,
+                )
+                .await
+            }
             Some(Commands::Sync { action }) => match action {
                 SyncAction::Likes {
                     full,
@@ -575,6 +612,11 @@ impl Cli {
                         show_emoji,
                     )
                     .await
+                }
+            },
+            Some(Commands::Resonance { action }) => match action {
+                ResonanceAction::Refresh { max_per_collection } => {
+                    resonance::run_refresh(&self, *max_per_collection, show_emoji).await
                 }
             },
             None => {

@@ -7,5 +7,6 @@ pub mod insights;
 pub mod likes;
 pub mod list;
 pub mod read;
+pub mod resonance;
 pub mod sync;
 pub mod whoami;

@@ -2,7 +2,8 @@
 
 use async_trait::async_trait;
 use bird_core::{
-    Error, MentionedUser, Result, SyncState, SyncStateStore, TweetData, TweetStore, UserStore,
+    Error, MentionedUser, ResonanceScore, ResonanceStore, Result, SyncState, SyncStateStore,
+    TweetData, TweetStore, UserStore,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
@@ -14,6 +15,7 @@ pub struct MemoryStorage {
     sync_states: RwLock<HashMap<(String, String), SyncState>>, // (collection, user_id) -> state
     users: RwLock<HashMap<String, MentionedUser>>,             // user_id -> user
     usernames: RwLock<HashMap<String, String>>,                // username_lower -> user_id
+    resonance_scores: RwLock<HashMap<(String, String), ResonanceScore>>, // (tweet_id, user_id) -> score
 }
 
 impl MemoryStorage {
@@ -25,6 +27,7 @@ impl MemoryStorage {
             sync_states: RwLock::new(HashMap::new()),
             users: RwLock::new(HashMap::new()),
             usernames: RwLock::new(HashMap::new()),
+            resonance_scores: RwLock::new(HashMap::new()),
         }
     }
 }
@@ -226,6 +229,111 @@ impl TweetStore for MemoryStorage {
 
         Ok(updated)
     }
+
+    async fn get_tweets_by_ids(&self, ids: &[&str]) -> Result<Vec<TweetData>> {
+        let tweets = self
+            .tweets
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+
+        Ok(ids.iter().filter_map(|id| tweets.get(*id).cloned()).collect())
+    }
+
+    async fn get_collection_tweet_ids(
+        &self,
+        collection: &str,
+        user_id: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<String>> {
+        let collections = self
+            .collections
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+
+        let key = (collection.to_string(), user_id.to_string());
+        let tweet_ids = collections.get(&key);
+
+        if let Some(ids) = tweet_ids {
+            let limit = limit.map(|l| l as usize).unwrap_or(usize::MAX);
+            Ok(ids.iter().take(limit).cloned().collect())
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    async fn get_user_reply_tweets(
+        &self,
+        user_id: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<(String, String)>> {
+        let collections = self
+            .collections
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+        let tweets = self
+            .tweets
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+
+        let key = ("user_tweets".to_string(), user_id.to_string());
+        let tweet_ids = collections.get(&key);
+
+        let limit = limit.map(|l| l as usize).unwrap_or(usize::MAX);
+
+        if let Some(ids) = tweet_ids {
+            let results: Vec<(String, String)> = ids
+                .iter()
+                .filter_map(|id| {
+                    tweets.get(id).and_then(|t| {
+                        t.in_reply_to_status_id
+                            .as_ref()
+                            .map(|reply_to| (t.id.clone(), reply_to.clone()))
+                    })
+                })
+                .take(limit)
+                .collect();
+            Ok(results)
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    async fn get_user_quote_tweets(
+        &self,
+        user_id: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<(String, String)>> {
+        let collections = self
+            .collections
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+        let tweets = self
+            .tweets
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+
+        let key = ("user_tweets".to_string(), user_id.to_string());
+        let tweet_ids = collections.get(&key);
+
+        let limit = limit.map(|l| l as usize).unwrap_or(usize::MAX);
+
+        if let Some(ids) = tweet_ids {
+            let results: Vec<(String, String)> = ids
+                .iter()
+                .filter_map(|id| {
+                    tweets.get(id).and_then(|t| {
+                        t.quoted_tweet
+                            .as_ref()
+                            .map(|qt| (t.id.clone(), qt.id.clone()))
+                    })
+                })
+                .take(limit)
+                .collect();
+            Ok(results)
+        } else {
+            Ok(Vec::new())
+        }
+    }
 }
 
 #[async_trait]
@@ -273,6 +381,15 @@ impl SyncStateStore for MemoryStorage {
             .filter(|((_, uid), _)| uid == user_id)
             .map(|(_, state)| state.clone())
             .collect())
+    }
+
+    async fn get_any_synced_user_id(&self) -> Result<Option<String>> {
+        let states = self
+            .sync_states
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+
+        Ok(states.keys().next().map(|(_, user_id)| user_id.clone()))
     }
 }
 
@@ -369,6 +486,104 @@ impl UserStore for MemoryStorage {
         }
 
         Ok(results)
+    }
+}
+
+#[async_trait]
+impl ResonanceStore for MemoryStorage {
+    async fn get_resonance_score(
+        &self,
+        tweet_id: &str,
+        user_id: &str,
+    ) -> Result<Option<ResonanceScore>> {
+        let scores = self
+            .resonance_scores
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+
+        let key = (tweet_id.to_string(), user_id.to_string());
+        Ok(scores.get(&key).cloned())
+    }
+
+    async fn get_top_resonance_scores(
+        &self,
+        user_id: &str,
+        limit: u32,
+        offset: Option<u32>,
+    ) -> Result<Vec<ResonanceScore>> {
+        let scores = self
+            .resonance_scores
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+
+        let offset = offset.unwrap_or(0) as usize;
+        let limit = limit as usize;
+
+        let mut user_scores: Vec<_> = scores
+            .values()
+            .filter(|s| s.user_id == user_id)
+            .cloned()
+            .collect();
+
+        // Sort by total descending
+        user_scores.sort_by(|a, b| b.total.partial_cmp(&a.total).unwrap_or(std::cmp::Ordering::Equal));
+
+        Ok(user_scores.into_iter().skip(offset).take(limit).collect())
+    }
+
+    async fn upsert_resonance_score(&self, score: &ResonanceScore) -> Result<()> {
+        let mut scores = self
+            .resonance_scores
+            .write()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+
+        let key = (score.tweet_id.clone(), score.user_id.clone());
+        scores.insert(key, score.clone());
+        Ok(())
+    }
+
+    async fn upsert_resonance_scores(&self, scores: &[ResonanceScore]) -> Result<usize> {
+        let mut storage = self
+            .resonance_scores
+            .write()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+
+        for score in scores {
+            let key = (score.tweet_id.clone(), score.user_id.clone());
+            storage.insert(key, score.clone());
+        }
+
+        Ok(scores.len())
+    }
+
+    async fn clear_resonance_scores(&self, user_id: &str) -> Result<u64> {
+        let mut scores = self
+            .resonance_scores
+            .write()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+
+        let keys_to_remove: Vec<_> = scores
+            .keys()
+            .filter(|(_, uid)| uid == user_id)
+            .cloned()
+            .collect();
+
+        let count = keys_to_remove.len() as u64;
+        for key in keys_to_remove {
+            scores.remove(&key);
+        }
+
+        Ok(count)
+    }
+
+    async fn resonance_score_count(&self, user_id: &str) -> Result<u64> {
+        let scores = self
+            .resonance_scores
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+
+        let count = scores.values().filter(|s| s.user_id == user_id).count() as u64;
+        Ok(count)
     }
 }
 

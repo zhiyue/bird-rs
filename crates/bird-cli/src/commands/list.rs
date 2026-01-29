@@ -3,10 +3,119 @@
 use crate::cli::Cli;
 use crate::output::format_json;
 use bird_client::{CurrentUserResult, TweetData};
+use bird_storage::ResonanceScore;
 use chrono::{DateTime, Local};
 use colored::Colorize;
+use serde::Serialize;
+use std::collections::HashMap;
 
 const DEFAULT_PAGE_SIZE: u32 = 20;
+
+/// Available columns for the list command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Column {
+    Id,
+    Text,
+    Time,
+    Author,
+    Liked,
+    Bookmarked,
+    Score,
+    Headline,
+}
+
+impl Column {
+    fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "id" => Some(Column::Id),
+            "text" => Some(Column::Text),
+            "time" => Some(Column::Time),
+            "author" => Some(Column::Author),
+            "liked" => Some(Column::Liked),
+            "bookmarked" => Some(Column::Bookmarked),
+            "score" => Some(Column::Score),
+            "headline" => Some(Column::Headline),
+            _ => None,
+        }
+    }
+
+    fn header(&self) -> &'static str {
+        match self {
+            Column::Id => "ID",
+            Column::Text => "Text",
+            Column::Time => "Time",
+            Column::Author => "Author",
+            Column::Liked => "Liked",
+            Column::Bookmarked => "Bookmarked",
+            Column::Score => "Score",
+            Column::Headline => "Headline",
+        }
+    }
+
+    fn width(&self) -> usize {
+        match self {
+            Column::Id => 20,
+            Column::Text => 40,
+            Column::Time => 18,
+            Column::Author => 15,
+            Column::Liked => 5,
+            Column::Bookmarked => 10,
+            Column::Score => 6,
+            Column::Headline => 30,
+        }
+    }
+
+    /// Returns true if this column requires resonance score data.
+    fn needs_resonance(&self) -> bool {
+        matches!(self, Column::Liked | Column::Bookmarked | Column::Score)
+    }
+}
+
+/// Parse columns from a list of strings.
+fn parse_columns(columns: Option<Vec<String>>) -> Result<Vec<Column>, String> {
+    match columns {
+        Some(cols) => {
+            let mut result = Vec::new();
+            for col in cols {
+                match Column::from_str(&col) {
+                    Some(c) => result.push(c),
+                    None => {
+                        return Err(format!(
+                            "Unknown column '{}'. Available: id, text, time, author, liked, bookmarked, score, headline",
+                            col
+                        ))
+                    }
+                }
+            }
+            if result.is_empty() {
+                Ok(default_columns())
+            } else {
+                Ok(result)
+            }
+        }
+        None => Ok(default_columns()),
+    }
+}
+
+fn default_columns() -> Vec<Column> {
+    vec![Column::Id, Column::Text, Column::Time]
+}
+
+/// JSON output with optional resonance data.
+#[derive(Serialize)]
+struct TweetWithResonance {
+    #[serde(flatten)]
+    tweet: TweetData,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resonance: Option<ResonanceJson>,
+}
+
+#[derive(Serialize)]
+struct ResonanceJson {
+    liked: bool,
+    bookmarked: bool,
+    score: f64,
+}
 
 /// Run the list command.
 pub async fn run(
@@ -15,8 +124,17 @@ pub async fn run(
     page: u32,
     page_size: Option<u32>,
     show_headline: bool,
+    columns: Option<Vec<String>>,
     show_emoji: bool,
 ) -> anyhow::Result<()> {
+    // Parse columns
+    let mut cols = parse_columns(columns).map_err(|e| anyhow::anyhow!(e))?;
+
+    // If show_headline is set and headline not in columns, add it
+    if show_headline && !cols.contains(&Column::Headline) {
+        cols.push(Column::Headline);
+    }
+
     let storage = cli.create_storage().await?;
     let mut client = cli.create_client()?;
 
@@ -39,8 +157,37 @@ pub async fn run(
         .get_tweets_by_collection(collection, &user_id, Some(size), Some(offset))
         .await?;
 
+    // Check if we need resonance data
+    let needs_resonance = cols.iter().any(|c| c.needs_resonance());
+    let resonance_map: HashMap<String, ResonanceScore> = if needs_resonance {
+        let tweet_ids: Vec<&str> = tweets.iter().map(|t| t.id.as_str()).collect();
+        let mut map = HashMap::new();
+        for id in tweet_ids {
+            if let Ok(Some(score)) = storage.get_resonance_score(id, &user_id).await {
+                map.insert(id.to_string(), score);
+            }
+        }
+        map
+    } else {
+        HashMap::new()
+    };
+
     if cli.json() {
-        println!("{}", format_json(&tweets));
+        let results: Vec<TweetWithResonance> = tweets
+            .iter()
+            .map(|t| {
+                let resonance = resonance_map.get(&t.id).map(|s| ResonanceJson {
+                    liked: s.liked,
+                    bookmarked: s.bookmarked,
+                    score: s.total,
+                });
+                TweetWithResonance {
+                    tweet: t.clone(),
+                    resonance,
+                }
+            })
+            .collect();
+        println!("{}", format_json(&results));
         return Ok(());
     }
 
@@ -54,11 +201,12 @@ pub async fn run(
     }
 
     // Print table header
-    print_table_header(show_headline, show_emoji);
+    print_table_header(&cols, show_emoji);
 
     // Print each tweet as a row
     for tweet in &tweets {
-        print_tweet_row(tweet, show_headline, show_emoji);
+        let resonance = resonance_map.get(&tweet.id);
+        print_tweet_row(tweet, resonance, &cols, show_emoji);
     }
 
     // Print pagination info
@@ -85,86 +233,119 @@ pub async fn run(
 }
 
 /// Print the table header.
-fn print_table_header(show_headline: bool, show_emoji: bool) {
-    let id_header = "ID";
-    let text_header = "Text";
-    let time_header = "Time";
-
+fn print_table_header(cols: &[Column], show_emoji: bool) {
     let icon = if show_emoji { "📋 " } else { "" };
-    if show_headline {
-        println!(
-            "{}{:<20} {:<40} {:<30} {}",
-            icon,
-            id_header.bold(),
-            text_header.bold(),
-            "Headline".bold(),
-            time_header.bold()
-        );
-        println!("{}", "─".repeat(110).dimmed());
-    } else {
-        println!(
-            "{}{:<20} {:<50} {}",
-            icon,
-            id_header.bold(),
-            text_header.bold(),
-            time_header.bold()
-        );
-        println!("{}", "─".repeat(90).dimmed());
-    }
+
+    let headers: Vec<String> = cols
+        .iter()
+        .map(|c| format!("{:<width$}", c.header().bold(), width = c.width()))
+        .collect();
+
+    println!("{}{}", icon, headers.join(" "));
+
+    let total_width: usize = cols.iter().map(|c| c.width() + 1).sum();
+    println!("{}", "─".repeat(total_width).dimmed());
 }
 
 /// Print a single tweet as a table row.
-fn print_tweet_row(tweet: &TweetData, show_headline: bool, _show_emoji: bool) {
-    let id = &tweet.id;
+fn print_tweet_row(
+    tweet: &TweetData,
+    resonance: Option<&ResonanceScore>,
+    cols: &[Column],
+    show_emoji: bool,
+) {
+    let values: Vec<String> = cols
+        .iter()
+        .map(|c| format_column(tweet, resonance, c, show_emoji))
+        .collect();
 
-    // Format timestamp
-    let time_str = format_timestamp(&tweet.created_at);
+    println!("{}", values.join(" "));
+}
 
-    if show_headline {
-        // Truncate text to 37 chars + "..."
-        let text = tweet.text.replace('\n', " ");
-        let truncated_text = if text.len() > 37 {
-            format!("{}...", &text[..37])
-        } else {
-            text
-        };
-
-        // Format headline (truncate to 27 chars + "...")
-        let headline = tweet
-            .headline
-            .as_ref()
-            .map(|h| {
-                let h = h.replace('\n', " ");
-                if h.len() > 27 {
-                    format!("{}...", &h[..27])
-                } else {
-                    h
-                }
-            })
-            .unwrap_or_else(|| "-".to_string());
-
-        println!(
-            "{:<20} {:<40} {:<30} {}",
-            id.cyan(),
-            truncated_text,
-            headline.yellow(),
-            time_str.dimmed()
-        );
+/// Truncate a string to a maximum number of characters (not bytes).
+fn truncate_str(s: &str, max_chars: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count > max_chars {
+        let truncated: String = s.chars().take(max_chars).collect();
+        format!("{}...", truncated)
     } else {
-        // Truncate text to 47 chars + "..."
-        let text = tweet.text.replace('\n', " ");
-        let truncated_text = if text.len() > 47 {
-            format!("{}...", &text[..47])
-        } else {
-            text
-        };
+        s.to_string()
+    }
+}
 
-        println!(
-            "{:<20} {:<50} {}",
-            id.cyan(),
-            truncated_text,
-            time_str.dimmed()
-        );
+/// Format a single column value.
+fn format_column(
+    tweet: &TweetData,
+    resonance: Option<&ResonanceScore>,
+    col: &Column,
+    show_emoji: bool,
+) -> String {
+    let width = col.width();
+
+    match col {
+        Column::Id => format!("{:<width$}", tweet.id.cyan(), width = width),
+
+        Column::Text => {
+            let text = tweet.text.replace('\n', " ");
+            let max_len = width.saturating_sub(3);
+            let truncated = truncate_str(&text, max_len);
+            format!("{:<width$}", truncated, width = width)
+        }
+
+        Column::Time => {
+            let time_str = format_timestamp(&tweet.created_at);
+            format!("{:<width$}", time_str.dimmed(), width = width)
+        }
+
+        Column::Author => {
+            let author = format!("@{}", tweet.author.username);
+            let max_len = width.saturating_sub(3);
+            let truncated = truncate_str(&author, max_len);
+            format!("{:<width$}", truncated.cyan(), width = width)
+        }
+
+        Column::Liked => {
+            let liked = resonance.map(|r| r.liked).unwrap_or(false);
+            let display = if liked {
+                if show_emoji { "❤️".to_string() } else { "Y".to_string() }
+            } else {
+                "-".to_string()
+            };
+            format!("{:<width$}", display, width = width)
+        }
+
+        Column::Bookmarked => {
+            let bookmarked = resonance.map(|r| r.bookmarked).unwrap_or(false);
+            let display = if bookmarked {
+                if show_emoji { "🔖".to_string() } else { "Y".to_string() }
+            } else {
+                "-".to_string()
+            };
+            format!("{:<width$}", display, width = width)
+        }
+
+        Column::Score => {
+            let score = resonance.map(|r| r.total).unwrap_or(0.0);
+            let display = if score > 0.0 {
+                format!("{:.2}", score).green().to_string()
+            } else {
+                "-".to_string()
+            };
+            format!("{:<width$}", display, width = width)
+        }
+
+        Column::Headline => {
+            let headline = tweet
+                .headline
+                .as_ref()
+                .map(|h| {
+                    let h = h.replace('\n', " ");
+                    let max_len = width.saturating_sub(3);
+                    truncate_str(&h, max_len)
+                })
+                .unwrap_or_else(|| "-".to_string());
+            format!("{:<width$}", headline.yellow(), width = width)
+        }
     }
 }
 

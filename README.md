@@ -40,6 +40,7 @@ bird sync likes
 | `bird sync bookmarks` | Sync bookmarks to local DB    |
 | `bird sync posts`     | Sync your own tweets to DB    |
 | `bird sync status`    | Show sync progress            |
+| `bird resonance refresh` | Compute resonance scores   |
 | `bird insights generate` | Analyze tweets with LLM    |
 | `bird db status`      | Show database status and counts |
 | `bird db optimize`    | Ensure schema and indexes exist |
@@ -102,6 +103,36 @@ To backfill headlines for existing tweets:
 ```bash
 bird db backfill-headlines --max-tweets 100
 ```
+
+## Resonance Scores
+
+Bird can track which tweets resonated most with you based on your interactions:
+
+| Interaction | Weight |
+| ----------- | ------ |
+| Bookmark    | 1.0    |
+| Quote       | 0.75   |
+| Like        | 0.5    |
+| Reply       | 0.25   |
+
+First, compute resonance scores from your synced data:
+
+```bash
+bird resonance refresh
+```
+
+Then use the `--columns` flag with `bird list` to display scores:
+
+```bash
+# Show score, liked, and bookmarked columns
+bird list likes --columns id,text,score,liked,bookmarked
+
+# Available columns: id, text, time, author, liked, bookmarked, score, headline
+bird list bookmarks --columns id,author,score
+```
+
+Resonance scores are cached locally and run fully offline. Re-run `bird resonance refresh`
+after syncing new data to update scores.
 
 ## Storage
 

@@ -46,9 +46,9 @@ impl Default for RateLimitConfig {
         Self {
             // 2.25 seconds per tweet simulates human reading/skimming speed
             delay_per_tweet_ms: 2250,
-            max_retries: 3,            // Try up to 3 times on 429 (then respect the limit)
+            max_retries: 3, // Try up to 3 times on 429 (then respect the limit)
             initial_backoff_ms: 60000, // Start with 60s backoff if no reset header
-            max_backoff_ms: 900000,    // Cap at 15 minutes (typical Twitter rate limit window)
+            max_backoff_ms: 900000, // Cap at 15 minutes (typical Twitter rate limit window)
             stats: Arc::new(Mutex::new(RateLimitInfo::default())),
         }
     }

@@ -216,6 +216,25 @@ export CT0=your_ct0_token
 bird --auth-token TOKEN --ct0 CT0 whoami
 ```
 
+## Technical Notes
+
+### Query ID Discovery
+
+Twitter rotates GraphQL query IDs periodically, which can break API clients.
+Bird automatically discovers fresh IDs by scraping Twitter's JavaScript bundles.
+This is transparent and requires no manual intervention.
+
+- Cache: `~/.config/bird/query-ids-cache.json` (24-hour TTL)
+- Auto-refreshes on stale cache or API errors
+- Falls back to static IDs if discovery fails
+
+See [docs/query-id-rotation.md](docs/query-id-rotation.md) for details.
+
+### Rate Limiting
+
+Bird uses human-like request pacing (2.25 seconds per tweet) to avoid rate
+limits. When rate limited, it respects Twitter's `x-rate-limit-reset` header.
+
 ## Crates
 
 | Crate          | Description             |

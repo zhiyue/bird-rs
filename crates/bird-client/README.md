@@ -9,6 +9,7 @@ Twitter/X GraphQL API client with pagination and rate limiting.
 - Cursor-based pagination
 - Rate limiting with exponential backoff
 - Cookie-based authentication
+- **Dynamic query ID discovery** - automatically recovers from Twitter's query ID rotation
 
 ## Usage
 
@@ -39,12 +40,27 @@ The `RateLimitConfig` controls request pacing:
 
 ```rust
 RateLimitConfig {
-    delay_ms: 1000,           // Delay between pages
-    max_retries: 4,           // Retries on 429
-    initial_backoff_ms: 1000, // Starting backoff
-    max_backoff_ms: 16000,    // Backoff cap
+    delay_per_tweet_ms: 2250, // 2.25s per tweet (human-like)
+    max_retries: 3,           // Retries on 429
+    initial_backoff_ms: 60000, // 60s starting backoff
+    max_backoff_ms: 900000,   // 15 min backoff cap
 }
 ```
+
+When rate limited (429), the client respects the `x-rate-limit-reset` header
+and waits until the reset time before retrying.
+
+## Query ID Discovery
+
+Twitter rotates GraphQL query IDs periodically. This client automatically
+discovers fresh IDs by scraping Twitter's JavaScript bundles.
+
+- **Cache location:** `~/.config/bird/query-ids-cache.json`
+- **TTL:** 24 hours
+- **Auto-refresh:** On stale cache or "Query: Unspecified" errors
+
+The discovery is transparent - no manual intervention required. If discovery
+fails, static fallback IDs are used.
 
 ## Authentication
 

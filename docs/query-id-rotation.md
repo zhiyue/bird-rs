@@ -17,19 +17,75 @@ This breaks API clients until they're updated with fresh IDs.
 Error: Twitter API error: Query: Unspecified
 ```
 
-**Current impact:** Our likes backfill is blocked because both of our hardcoded query IDs for the Likes operation are now stale.
+## Solution: Dynamic Query ID Discovery
 
-## Current Implementation
+Bird implements automatic query ID discovery by scraping Twitter's JavaScript bundles at runtime. This is a self-healing system that recovers from ID rotation without manual intervention.
 
-We use static fallback query IDs defined in `crates/bird-client/src/constants.rs`:
+### How It Works
+
+1. **Cache Check**: First checks disk cache at `~/.config/bird/query-ids-cache.json` (24-hour TTL)
+2. **Discovery**: If cache is stale or missing, fetches X.com pages and extracts JS bundle URLs
+3. **Extraction**: Downloads bundles and uses regex patterns to extract query IDs
+4. **Caching**: Saves discovered IDs to disk and memory for future use
+5. **Fallback**: If discovery fails, falls back to static IDs in source code
+
+### Implementation
+
+The discovery system is in `crates/bird-client/src/query_ids.rs`:
 
 ```rust
-Operation::Likes => &["ETJflBunfqNa1uE1mBPCaw", "JR2gceKucIKcVNB_9JkhsA"],
-Operation::Bookmarks => &["RV1g3b8n_SGOHwkqKYSCFw", "tmd4ifV8RHltzn8ymGg1aw"],
+// Query ID manager handles discovery and caching
+pub struct QueryIdManager {
+    client: Client,
+    cache: Arc<RwLock<QueryIdCache>>,
+    fallbacks: HashMap<String, Vec<String>>,
+}
+
+impl QueryIdManager {
+    /// Get all query IDs to try for an operation (cached + fallbacks)
+    pub async fn get_all(&self, operation: &str) -> Vec<String>;
+
+    /// Force refresh from Twitter's JS bundles
+    pub async fn refresh(&self) -> Result<(), QueryIdError>;
+}
+```
+
+### Auto-Refresh on Errors
+
+Operations like `fetch_likes` automatically refresh query IDs when they encounter stale ID errors:
+
+```rust
+match self.fetch_likes_with_ids(user_id, options).await {
+    Ok(result) => Ok(result),
+    Err(e) => {
+        // If query ID error, try refreshing and retrying
+        let should_refresh = matches!(&e, Error::ApiError(msg)
+            if msg.contains("Query: Unspecified") || msg.contains("All query IDs failed"));
+
+        if should_refresh {
+            if self.query_id_manager.refresh().await.is_ok() {
+                return self.fetch_likes_with_ids(user_id, options).await;
+            }
+        }
+        Err(e)
+    }
+}
+```
+
+## Static Fallbacks
+
+As a last resort, static fallback query IDs are defined in `crates/bird-client/src/constants.rs`:
+
+```rust
+Operation::Likes => &[
+    "fuBEtiFu3uQFuPDTsv4bfg", // Discovered 2026-01-30
+    "ETJflBunfqNa1uE1mBPCaw",
+    "JR2gceKucIKcVNB_9JkhsA",
+],
 // etc.
 ```
 
-Operations try each ID in sequence until one works. When all IDs are stale, the operation fails.
+Operations try each ID in sequence until one works.
 
 ## How steipete/bird Solves This
 
@@ -155,13 +211,14 @@ async fn discover_query_ids() -> Result<HashMap<String, String>> {
 
 ---
 
-## Recommendation
+## Implementation Notes
 
-**Short-term:** Implement **Option C** (CLI refresh command) as a quick fix.
+**Option B (dynamic discovery) is now implemented.** The system is self-healing and automatically recovers from query ID rotation.
 
-**Long-term:** Implement **Option B** (dynamic discovery) for self-healing.
-
-The hybrid approach lets us ship a fix quickly while working on the robust solution.
+Key files:
+- `crates/bird-client/src/query_ids.rs` - Discovery and caching logic
+- `crates/bird-client/src/constants.rs` - Static fallback IDs
+- `crates/bird-client/src/operations/likes.rs` - Auto-refresh on errors
 
 ## Technical Details
 
@@ -217,6 +274,7 @@ Following, Followers, UserTweets, SearchTimeline, HomeTimeline
 ## Status
 
 - [x] Document the problem
-- [ ] Implement CLI refresh command (Option C)
-- [ ] Implement dynamic discovery (Option B)
-- [ ] Add 404 detection and auto-refresh
+- [x] Implement dynamic discovery (Option B)
+- [x] Add 404 detection and auto-refresh
+- [x] Disk caching with 24-hour TTL
+- [x] Update fallback IDs with discovered values

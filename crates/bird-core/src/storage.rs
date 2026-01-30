@@ -222,7 +222,8 @@ impl ResonanceScore {
         quote_count: u32,
         retweet_count: u32,
     ) -> Self {
-        let total = Self::calculate_total(liked, bookmarked, reply_count, quote_count, retweet_count);
+        let total =
+            Self::calculate_total(liked, bookmarked, reply_count, quote_count, retweet_count);
         Self {
             tweet_id,
             user_id,

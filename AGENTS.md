@@ -2,6 +2,18 @@
 
 You are working on **bird-rs**, a fast X/Twitter CLI written in Rust for reading tweets and syncing collections (likes, bookmarks) to a local SurrealDB database.
 
+## Influences
+
+This project was influenced by some projects from Peter Steinberger (steipete):
+
+```
+ghq get steipete/bird
+ghq get steipete/sweet-cookie
+ghq get kevinmichaelchen/sweet-cookie-rs
+```
+
+All projects should be available on the filesystem.
+
 ## Project Structure
 
 ```

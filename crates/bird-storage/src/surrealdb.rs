@@ -815,16 +815,13 @@ impl SurrealDbStorage {
 
         // Fetch referenced tweets in a single batch query
         let ref_map: std::collections::HashMap<String, TweetData> = if !ref_ids.is_empty() {
-            let ref_record_refs: Vec<String> = ref_ids
-                .iter()
-                .map(|id| format!("tweet:⟨{}⟩", id))
-                .collect();
+            let ref_record_refs: Vec<String> =
+                ref_ids.iter().map(|id| format!("tweet:⟨{}⟩", id)).collect();
             let ref_query = format!("SELECT * FROM [{}]", ref_record_refs.join(", "));
-            let mut ref_result = self
-                .db
-                .query(&ref_query)
-                .await
-                .map_err(|e| Error::Storage(format!("Failed to get referenced tweets: {}", e)))?;
+            let mut ref_result =
+                self.db.query(&ref_query).await.map_err(|e| {
+                    Error::Storage(format!("Failed to get referenced tweets: {}", e))
+                })?;
             let ref_records: Vec<TweetRecord> = ref_result
                 .take(0)
                 .map_err(|e| Error::Storage(format!("Failed to parse referenced tweets: {}", e)))?;
@@ -1057,16 +1054,13 @@ impl TweetStore for SurrealDbStorage {
 
         // Fetch referenced tweets in a single batch query
         let ref_map: std::collections::HashMap<String, TweetData> = if !ref_ids.is_empty() {
-            let ref_record_refs: Vec<String> = ref_ids
-                .iter()
-                .map(|id| format!("tweet:⟨{}⟩", id))
-                .collect();
+            let ref_record_refs: Vec<String> =
+                ref_ids.iter().map(|id| format!("tweet:⟨{}⟩", id)).collect();
             let ref_query = format!("SELECT * FROM [{}]", ref_record_refs.join(", "));
-            let mut ref_result = self
-                .db
-                .query(&ref_query)
-                .await
-                .map_err(|e| Error::Storage(format!("Failed to get referenced tweets: {}", e)))?;
+            let mut ref_result =
+                self.db.query(&ref_query).await.map_err(|e| {
+                    Error::Storage(format!("Failed to get referenced tweets: {}", e))
+                })?;
             let ref_records: Vec<TweetRecord> = ref_result
                 .take(0)
                 .map_err(|e| Error::Storage(format!("Failed to parse referenced tweets: {}", e)))?;

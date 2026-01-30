@@ -224,7 +224,7 @@ Twitter rotates GraphQL query IDs periodically, which can break API clients.
 Bird automatically discovers fresh IDs by scraping Twitter's JavaScript bundles.
 This is transparent and requires no manual intervention.
 
-- Cache: `~/.config/bird/query-ids-cache.json` (24-hour TTL)
+- Cache: `~/.bird/query-ids-cache.json` (24-hour TTL)
 - Auto-refreshes on stale cache or API errors
 - Falls back to static IDs if discovery fails
 

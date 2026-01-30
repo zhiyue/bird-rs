@@ -23,7 +23,7 @@ Bird implements automatic query ID discovery by scraping Twitter's JavaScript bu
 
 ### How It Works
 
-1. **Cache Check**: First checks disk cache at `~/.config/bird/query-ids-cache.json` (24-hour TTL)
+1. **Cache Check**: First checks disk cache at `~/.bird/query-ids-cache.json` (24-hour TTL)
 2. **Discovery**: If cache is stale or missing, fetches X.com pages and extracts JS bundle URLs
 3. **Extraction**: Downloads bundles and uses regex patterns to extract query IDs
 4. **Caching**: Saves discovered IDs to disk and memory for future use

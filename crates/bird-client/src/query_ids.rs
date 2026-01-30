@@ -65,12 +65,12 @@ impl QueryIdCache {
         age.num_seconds() < self.ttl_secs as i64
     }
 
-    /// Get the cache file path.
+    /// Get the cache file path (~/.bird/query-ids-cache.json).
     fn cache_path() -> Option<PathBuf> {
         if let Ok(path) = std::env::var("BIRD_QUERY_IDS_CACHE") {
             return Some(PathBuf::from(path));
         }
-        dirs::config_dir().map(|d| d.join("bird").join("query-ids-cache.json"))
+        dirs::home_dir().map(|d| d.join(".bird").join("query-ids-cache.json"))
     }
 
     /// Load cache from disk.

@@ -55,7 +55,7 @@ and waits until the reset time before retrying.
 Twitter rotates GraphQL query IDs periodically. This client automatically
 discovers fresh IDs by scraping Twitter's JavaScript bundles.
 
-- **Cache location:** `~/.config/bird/query-ids-cache.json`
+- **Cache location:** `~/.bird/query-ids-cache.json`
 - **TTL:** 24 hours
 - **Auto-refresh:** On stale cache or "Query: Unspecified" errors
 

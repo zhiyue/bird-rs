@@ -1539,34 +1539,24 @@ impl TweetStore for SurrealDbStorage {
         let limit = limit.unwrap_or(100);
         let offset = offset.unwrap_or(0);
 
-        // Build list of collection placeholders for query
-        let collection_placeholders: Vec<String> =
-            collections.iter().map(|_| "$".to_string()).collect();
-        let collection_param_list = collection_placeholders.join(", ");
+        // Convert collections slice to owned vector for binding
+        let collections_vec: Vec<String> = collections.iter().map(|c| c.to_string()).collect();
 
         // Query: get unique tweets from all collections with their collection memberships
-        let query = format!(
-            "SELECT
-                tweet_id,
-                array::distinct(array::flatten(array::group(collection))) as collections,
-                time::min(array::group(added_at)) as first_seen_at
-            FROM tweet_collection
-            WHERE collection IN [{}] AND user_id = $user_id
-            GROUP BY tweet_id
-            ORDER BY first_seen_at DESC
-            LIMIT $limit START $offset",
-            collection_param_list
-        );
+        let query = "SELECT
+            tweet_id,
+            array::distinct(array::flatten(array::group(collection))) as collections,
+            time::min(array::group(added_at)) as first_seen_at
+        FROM tweet_collection
+        WHERE collection IN $collections AND user_id = $user_id
+        GROUP BY tweet_id
+        ORDER BY first_seen_at DESC
+        LIMIT $limit START $offset";
 
-        let mut query_builder = self.db.query(&query);
-
-        // Bind collection parameters
-        for (i, collection) in collections.iter().enumerate() {
-            query_builder =
-                query_builder.bind((format!("collection{}", i), collection.to_string()));
-        }
-
-        let mut result = query_builder
+        let mut result = self
+            .db
+            .query(query)
+            .bind(("collections", collections_vec))
             .bind(("user_id", user_id_owned.clone()))
             .bind(("limit", limit))
             .bind(("offset", offset))

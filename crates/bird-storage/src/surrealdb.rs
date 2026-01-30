@@ -1541,66 +1541,108 @@ impl TweetStore for SurrealDbStorage {
 
         // Convert collections slice to owned vector for binding
         let collections_vec: Vec<String> = collections.iter().map(|c| c.to_string()).collect();
+        let offset_usize = offset as usize;
+        let limit_usize = limit as usize;
 
-        // Query: get unique tweets from all collections with their collection memberships
-        let query = "SELECT
-            tweet_id,
-            array::distinct(array::flatten(array::group(collection))) as collections,
-            time::min(array::group(added_at)) as first_seen_at
+        // Query: get all records from tweet_collection for these collections
+        let query = "SELECT tweet_id, collection, added_at
         FROM tweet_collection
         WHERE collection IN $collections AND user_id = $user_id
-        GROUP BY tweet_id
-        ORDER BY first_seen_at DESC
-        LIMIT $limit START $offset";
+        ORDER BY added_at DESC";
 
         let mut result = self
             .db
             .query(query)
             .bind(("collections", collections_vec))
             .bind(("user_id", user_id_owned.clone()))
-            .bind(("limit", limit))
-            .bind(("offset", offset))
             .await
             .map_err(|e| Error::Storage(format!("Failed to get interleaved tweets: {}", e)))?;
 
         #[derive(Deserialize)]
-        #[allow(dead_code)]
-        struct CollectionRecord {
+        struct CollectionEntry {
             tweet_id: String,
-            collections: Vec<String>,
-            first_seen_at: Option<DateTime<Utc>>,
+            collection: String,
+            added_at: Option<DateTime<Utc>>,
         }
 
-        let collection_records: Vec<CollectionRecord> = result
+        let entries: Vec<CollectionEntry> = result
             .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse collection records: {}", e)))?;
 
-        // Now fetch the actual tweets
-        let tweet_ids: Vec<&str> = collection_records
-            .iter()
-            .map(|r| r.tweet_id.as_str())
+        // Aggregate in application: group by tweet_id, collect collections, find min added_at
+        let mut tweet_collections: std::collections::HashMap<
+            String,
+            (Vec<String>, Option<DateTime<Utc>>),
+        > = std::collections::HashMap::new();
+
+        for entry in entries {
+            let entry_ref = tweet_collections
+                .entry(entry.tweet_id.clone())
+                .or_insert_with(|| (Vec::new(), entry.added_at));
+
+            // Add collection if not already present
+            if !entry_ref.0.contains(&entry.collection) {
+                entry_ref.0.push(entry.collection);
+            }
+
+            // Keep the earlier timestamp
+            match (&entry_ref.1, entry.added_at) {
+                (Some(existing_time), Some(new_time)) => {
+                    if new_time < *existing_time {
+                        entry_ref.1 = Some(new_time);
+                    }
+                }
+                (None, Some(new_time)) => {
+                    entry_ref.1 = Some(new_time);
+                }
+                _ => {}
+            }
+        }
+
+        // Sort by min added_at descending and apply pagination
+        let mut sorted: Vec<(String, Vec<String>, Option<DateTime<Utc>>)> = tweet_collections
+            .into_iter()
+            .map(|(id, (colls, time))| (id, colls, time))
             .collect();
 
-        if tweet_ids.is_empty() {
+        sorted.sort_by(|a, b| {
+            // Sort by timestamp descending (most recent first)
+            b.2.cmp(&a.2)
+        });
+
+        // Apply pagination
+        let paginated: Vec<String> = sorted
+            .iter()
+            .skip(offset_usize)
+            .take(limit_usize)
+            .map(|(id, _, _)| id.clone())
+            .collect();
+
+        if paginated.is_empty() {
             return Ok(Vec::new());
         }
 
-        let tweets = self.get_tweets_by_ids(&tweet_ids).await?;
+        // Fetch the actual tweets
+        let tweet_refs: Vec<&str> = paginated.iter().map(|s| s.as_str()).collect();
+        let tweets = self.get_tweets_by_ids(&tweet_refs).await?;
 
         // Build a map of tweet_id -> tweet for fast lookup
         let tweet_map: std::collections::HashMap<String, TweetData> =
             tweets.into_iter().map(|t| (t.id.clone(), t)).collect();
 
-        // Combine tweets with their collections
-        let results: Vec<TweetWithCollections> = collection_records
+        // Combine tweets with their collections in the original order
+        let results: Vec<TweetWithCollections> = paginated
             .into_iter()
-            .filter_map(|record| {
-                tweet_map
-                    .get(&record.tweet_id)
-                    .map(|tweet| TweetWithCollections {
-                        tweet: tweet.clone(),
-                        collections: record.collections,
-                    })
+            .filter_map(|tweet_id| {
+                tweet_map.get(&tweet_id).and_then(|tweet| {
+                    sorted
+                        .iter()
+                        .find(|(id, _, _)| id == &tweet_id)
+                        .map(|(_, colls, _)| TweetWithCollections {
+                            tweet: tweet.clone(),
+                            collections: colls.clone(),
+                        })
+                })
             })
             .collect();
 

@@ -6,7 +6,7 @@ use std::process::Stdio;
 use tokio::process::Command;
 
 /// Default model for Claude Code.
-pub const DEFAULT_MODEL: &str = "sonnet";
+pub const DEFAULT_MODEL: &str = "haiku";
 
 /// Claude Code LLM provider - invokes the `claude` CLI.
 /// This uses your existing Anthropic MAX subscription.

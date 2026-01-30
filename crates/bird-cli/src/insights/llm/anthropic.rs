@@ -6,7 +6,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 /// Default model to use for Anthropic API.
-pub const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
+pub const DEFAULT_MODEL: &str = "claude-haiku-4-5-20251001";
 
 /// Anthropic API base URL.
 const API_BASE_URL: &str = "https://api.anthropic.com/v1/messages";

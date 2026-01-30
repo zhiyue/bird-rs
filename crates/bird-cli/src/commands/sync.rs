@@ -132,8 +132,11 @@ pub async fn run_backfill(
         user_id.dimmed()
     );
 
-    // Build rate limit config
-    let rate_limit = RateLimitConfig::with_delay(delay_ms.unwrap_or(1000));
+    // Build rate limit config (use default 45s human-like delay unless overridden)
+    let rate_limit = match delay_ms {
+        Some(ms) => RateLimitConfig::with_delay(ms),
+        None => RateLimitConfig::default(),
+    };
 
     // Build sync options with storage monitor and progress callback
     let options = SyncOptions {
@@ -208,8 +211,11 @@ async fn run_sync(
         user_id.dimmed()
     );
 
-    // Build rate limit config
-    let rate_limit = RateLimitConfig::with_delay(delay_ms.unwrap_or(1000));
+    // Build rate limit config (use default 45s human-like delay unless overridden)
+    let rate_limit = match delay_ms {
+        Some(ms) => RateLimitConfig::with_delay(ms),
+        None => RateLimitConfig::default(),
+    };
 
     // Build sync options with storage monitor and progress callback
     let options = SyncOptions {

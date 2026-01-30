@@ -200,8 +200,15 @@ impl ResonanceScore {
     pub const RETWEET_WEIGHT: f64 = 0.8;
     /// Resonance weight for a bookmark (highest - saved for later).
     pub const BOOKMARK_WEIGHT: f64 = 1.0;
+    /// Synergy multiplier when both liked and bookmarked (interactions compound).
+    pub const SYNERGY_MULTIPLIER: f64 = 1.5;
 
-    /// Calculate total score from components.
+    /// Calculate total score from components using synergistic resonance formula.
+    ///
+    /// Formula: `base * active_multiplier * synergy_multiplier`
+    /// - Base: 1.0 + like*0.25 + bookmark*1.0 (passive interactions)
+    /// - Active multiplier: 1.0 + reply*0.5 + quote*0.75 + retweet*0.8
+    /// - Synergy multiplier: 1.5 if liked AND bookmarked, else 1.0
     pub fn calculate_total(
         liked: bool,
         bookmarked: bool,
@@ -209,17 +216,25 @@ impl ResonanceScore {
         quote_count: u32,
         retweet_count: u32,
     ) -> f64 {
-        let mut total = 0.0;
-        if liked {
-            total += Self::LIKE_WEIGHT;
-        }
-        if bookmarked {
-            total += Self::BOOKMARK_WEIGHT;
-        }
-        total += reply_count as f64 * Self::REPLY_WEIGHT;
-        total += quote_count as f64 * Self::QUOTE_WEIGHT;
-        total += retweet_count as f64 * Self::RETWEET_WEIGHT;
-        total
+        // Base score from passive interactions
+        let base = 1.0
+            + (if liked { Self::LIKE_WEIGHT } else { 0.0 })
+            + (if bookmarked { Self::BOOKMARK_WEIGHT } else { 0.0 });
+
+        // Multiplier from active interactions
+        let active_multiplier = 1.0
+            + (reply_count as f64 * Self::REPLY_WEIGHT)
+            + (quote_count as f64 * Self::QUOTE_WEIGHT)
+            + (retweet_count as f64 * Self::RETWEET_WEIGHT);
+
+        // Synergy bonus: Multiple passive interactions compound
+        let synergy_multiplier = if liked && bookmarked {
+            Self::SYNERGY_MULTIPLIER
+        } else {
+            1.0
+        };
+
+        base * active_multiplier * synergy_multiplier
     }
 
     /// Create a new resonance score.

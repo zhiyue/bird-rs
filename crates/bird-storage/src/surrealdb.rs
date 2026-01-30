@@ -102,7 +102,10 @@ struct TweetRecordContent {
     mentions: Vec<MentionedUserRecord>,
     media: Option<serde_json::Value>,
     article: Option<serde_json::Value>,
-    quoted_tweet: Option<serde_json::Value>,
+    /// ID of the quoted tweet (normalized - actual tweet stored separately)
+    quoted_tweet_id: Option<String>,
+    /// ID of the retweeted tweet (normalized - actual tweet stored separately)
+    retweeted_tweet_id: Option<String>,
     headline: Option<String>,
     fetched_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -139,7 +142,12 @@ struct TweetRecord {
     mentions: Vec<MentionedUserRecord>,
     media: Option<serde_json::Value>,
     article: Option<serde_json::Value>,
-    quoted_tweet: Option<serde_json::Value>,
+    /// ID of the quoted tweet (normalized)
+    #[serde(default)]
+    quoted_tweet_id: Option<String>,
+    /// ID of the retweeted tweet (normalized)
+    #[serde(default)]
+    retweeted_tweet_id: Option<String>,
     #[serde(default)]
     headline: Option<String>,
     #[allow(dead_code)]
@@ -185,10 +193,9 @@ impl From<&TweetData> for TweetRecordContent {
                 .article
                 .as_ref()
                 .and_then(|a| serde_json::to_value(a).ok()),
-            quoted_tweet: tweet
-                .quoted_tweet
-                .as_ref()
-                .and_then(|q| serde_json::to_value(q.as_ref()).ok()),
+            // Store just the ID - the referenced tweet is stored separately
+            quoted_tweet_id: tweet.quoted_tweet.as_ref().map(|q| q.id.clone()),
+            retweeted_tweet_id: tweet.retweeted_tweet.as_ref().map(|r| r.id.clone()),
             headline: tweet.headline.clone(),
             fetched_at: now,
             updated_at: now,
@@ -231,11 +238,10 @@ impl TryFrom<TweetRecord> for TweetData {
                     name: m.name,
                 })
                 .collect(),
-            quoted_tweet: record
-                .quoted_tweet
-                .map(serde_json::from_value)
-                .transpose()
-                .map_err(|e| Error::Serialization(e.to_string()))?,
+            // quoted_tweet and retweeted_tweet are hydrated separately
+            // The IDs are stored in the record but not converted here
+            quoted_tweet: None,
+            retweeted_tweet: None,
             media: record
                 .media
                 .map(serde_json::from_value)
@@ -758,7 +764,9 @@ impl SurrealDbStorage {
 
         // Index for finding replies by in_reply_to_status_id
         self.db
-            .query("DEFINE INDEX IF NOT EXISTS tweet_reply_to ON tweet FIELDS in_reply_to_status_id")
+            .query(
+                "DEFINE INDEX IF NOT EXISTS tweet_reply_to ON tweet FIELDS in_reply_to_status_id",
+            )
             .await
             .map_err(|e| Error::Storage(format!("Failed to create tweet reply_to index: {}", e)))?;
 
@@ -766,7 +774,9 @@ impl SurrealDbStorage {
         self.db
             .query("DEFINE TABLE IF NOT EXISTS resonance_score SCHEMALESS")
             .await
-            .map_err(|e| Error::Storage(format!("Failed to create resonance_score table: {}", e)))?;
+            .map_err(|e| {
+                Error::Storage(format!("Failed to create resonance_score table: {}", e))
+            })?;
 
         self.db
             .query("DEFINE INDEX IF NOT EXISTS resonance_score_pk ON resonance_score FIELDS tweet_id, user_id UNIQUE")
@@ -780,11 +790,91 @@ impl SurrealDbStorage {
 
         Ok(())
     }
+
+    /// Hydrate a list of TweetRecords by fetching their referenced tweets in batch.
+    /// Returns a Vec of hydrated TweetData.
+    async fn hydrate_tweet_records(&self, records: Vec<TweetRecord>) -> Result<Vec<TweetData>> {
+        if records.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Collect all referenced tweet IDs
+        let ref_ids: Vec<String> = records
+            .iter()
+            .flat_map(|r| {
+                let mut ids = Vec::new();
+                if let Some(ref id) = r.quoted_tweet_id {
+                    ids.push(id.clone());
+                }
+                if let Some(ref id) = r.retweeted_tweet_id {
+                    ids.push(id.clone());
+                }
+                ids
+            })
+            .collect();
+
+        // Fetch referenced tweets in a single batch query
+        let ref_map: std::collections::HashMap<String, TweetData> = if !ref_ids.is_empty() {
+            let ref_record_refs: Vec<String> = ref_ids
+                .iter()
+                .map(|id| format!("tweet:⟨{}⟩", id))
+                .collect();
+            let ref_query = format!("SELECT * FROM [{}]", ref_record_refs.join(", "));
+            let mut ref_result = self
+                .db
+                .query(&ref_query)
+                .await
+                .map_err(|e| Error::Storage(format!("Failed to get referenced tweets: {}", e)))?;
+            let ref_records: Vec<TweetRecord> = ref_result
+                .take(0)
+                .map_err(|e| Error::Storage(format!("Failed to parse referenced tweets: {}", e)))?;
+            ref_records
+                .into_iter()
+                .filter_map(|r| {
+                    let id = r.tweet_id.clone();
+                    r.try_into().ok().map(|t: TweetData| (id, t))
+                })
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
+
+        // Convert and hydrate each record
+        let tweets: Vec<TweetData> = records
+            .into_iter()
+            .filter_map(|r| {
+                let quoted_id = r.quoted_tweet_id.clone();
+                let retweeted_id = r.retweeted_tweet_id.clone();
+                r.try_into().ok().map(|mut t: TweetData| {
+                    if let Some(ref qt_id) = quoted_id {
+                        t.quoted_tweet = ref_map.get(qt_id).cloned().map(Box::new);
+                    }
+                    if let Some(ref rt_id) = retweeted_id {
+                        t.retweeted_tweet = ref_map.get(rt_id).cloned().map(Box::new);
+                    }
+                    t
+                })
+            })
+            .collect();
+
+        Ok(tweets)
+    }
 }
 
 #[async_trait]
 impl TweetStore for SurrealDbStorage {
     async fn upsert_tweet(&self, tweet: &TweetData) -> Result<()> {
+        // First, upsert any referenced tweets (quoted/retweeted) as separate records
+        if let Some(ref quoted) = tweet.quoted_tweet {
+            // Recursively upsert the quoted tweet (use Box::pin for async recursion)
+            Box::pin(self.upsert_tweet(quoted)).await?;
+        }
+        if let Some(ref retweeted) = tweet.retweeted_tweet {
+            // Recursively upsert the retweeted tweet
+            Box::pin(self.upsert_tweet(retweeted)).await?;
+        }
+
+        // Now upsert the main tweet (with just IDs for references)
         let content = TweetRecordContent::from(tweet);
         let id = &tweet.id;
 
@@ -831,11 +921,13 @@ impl TweetStore for SurrealDbStorage {
             .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse tweet: {}", e)))?;
 
-        if let Some(record) = records.into_iter().next() {
-            Ok(Some(record.try_into()?))
-        } else {
-            Ok(None)
+        if records.is_empty() {
+            return Ok(None);
         }
+
+        // Use helper to hydrate referenced tweets
+        let mut tweets = self.hydrate_tweet_records(records).await?;
+        Ok(tweets.pop())
     }
 
     async fn tweet_exists(&self, id: &str) -> Result<bool> {
@@ -948,12 +1040,64 @@ impl TweetStore for SurrealDbStorage {
             .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse tweets: {}", e)))?;
 
-        // Build a map for ordering
+        // Collect all referenced tweet IDs for batch hydration
+        let ref_ids: Vec<String> = records
+            .iter()
+            .flat_map(|r| {
+                let mut ids = Vec::new();
+                if let Some(ref id) = r.quoted_tweet_id {
+                    ids.push(id.clone());
+                }
+                if let Some(ref id) = r.retweeted_tweet_id {
+                    ids.push(id.clone());
+                }
+                ids
+            })
+            .collect();
+
+        // Fetch referenced tweets in a single batch query
+        let ref_map: std::collections::HashMap<String, TweetData> = if !ref_ids.is_empty() {
+            let ref_record_refs: Vec<String> = ref_ids
+                .iter()
+                .map(|id| format!("tweet:⟨{}⟩", id))
+                .collect();
+            let ref_query = format!("SELECT * FROM [{}]", ref_record_refs.join(", "));
+            let mut ref_result = self
+                .db
+                .query(&ref_query)
+                .await
+                .map_err(|e| Error::Storage(format!("Failed to get referenced tweets: {}", e)))?;
+            let ref_records: Vec<TweetRecord> = ref_result
+                .take(0)
+                .map_err(|e| Error::Storage(format!("Failed to parse referenced tweets: {}", e)))?;
+            ref_records
+                .into_iter()
+                .filter_map(|r| {
+                    let id = r.tweet_id.clone();
+                    r.try_into().ok().map(|t: TweetData| (id, t))
+                })
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
+
+        // Build a map for ordering, with hydration
         let tweet_map: std::collections::HashMap<String, TweetData> = records
             .into_iter()
             .filter_map(|r| {
                 let id = r.tweet_id.clone();
-                r.try_into().ok().map(|t: TweetData| (id, t))
+                let quoted_id = r.quoted_tweet_id.clone();
+                let retweeted_id = r.retweeted_tweet_id.clone();
+                r.try_into().ok().map(|mut t: TweetData| {
+                    // Hydrate from the reference map
+                    if let Some(ref qt_id) = quoted_id {
+                        t.quoted_tweet = ref_map.get(qt_id).cloned().map(Box::new);
+                    }
+                    if let Some(ref rt_id) = retweeted_id {
+                        t.retweeted_tweet = ref_map.get(rt_id).cloned().map(Box::new);
+                    }
+                    (id, t)
+                })
             })
             .collect();
 
@@ -1111,7 +1255,7 @@ impl TweetStore for SurrealDbStorage {
             .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse tweets: {}", e)))?;
 
-        records.into_iter().map(|r| r.try_into()).collect()
+        self.hydrate_tweet_records(records).await
     }
 
     async fn update_tweet_headlines(&self, headlines: &[(String, String)]) -> Result<usize> {
@@ -1153,7 +1297,8 @@ impl TweetStore for SurrealDbStorage {
             .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse tweets: {}", e)))?;
 
-        records.into_iter().map(|r| r.try_into()).collect()
+        // Use helper to hydrate referenced tweets
+        self.hydrate_tweet_records(records).await
     }
 
     async fn get_collection_tweet_ids(
@@ -1264,7 +1409,7 @@ impl TweetStore for SurrealDbStorage {
         user_id: &str,
         limit: Option<u32>,
     ) -> Result<Vec<(String, String)>> {
-        // Get tweets from user_tweets collection that have quoted_tweet
+        // Get tweets from user_tweets collection that have quoted_tweet_id
         let user_id_owned = user_id.to_string();
         let limit = limit.unwrap_or(1000);
 
@@ -1298,7 +1443,7 @@ impl TweetStore for SurrealDbStorage {
             .map(|r| format!("tweet:⟨{}⟩", r.tweet_id))
             .collect();
         let query = format!(
-            "SELECT tweet_id, quoted_tweet FROM [{}] WHERE quoted_tweet IS NOT NONE",
+            "SELECT tweet_id, quoted_tweet_id FROM [{}] WHERE quoted_tweet_id IS NOT NONE",
             record_refs.join(", ")
         );
 
@@ -1311,22 +1456,81 @@ impl TweetStore for SurrealDbStorage {
         #[derive(Deserialize)]
         struct QuoteRecord {
             tweet_id: String,
-            quoted_tweet: serde_json::Value,
+            quoted_tweet_id: String,
         }
 
         let records: Vec<QuoteRecord> = result
             .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse quote records: {}", e)))?;
 
-        // Extract the quoted tweet ID from the JSON
         Ok(records
             .into_iter()
-            .filter_map(|r| {
-                r.quoted_tweet
-                    .get("id")
-                    .and_then(|id| id.as_str())
-                    .map(|id| (r.tweet_id, id.to_string()))
-            })
+            .map(|r| (r.tweet_id, r.quoted_tweet_id))
+            .collect())
+    }
+
+    async fn get_user_retweets(
+        &self,
+        user_id: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<(String, String)>> {
+        // Get tweets from user_tweets collection that have retweeted_tweet_id
+        let user_id_owned = user_id.to_string();
+        let limit = limit.unwrap_or(1000);
+
+        // First get tweet IDs from user_tweets collection
+        let mut id_result = self
+            .db
+            .query(
+                "SELECT tweet_id FROM tweet_collection WHERE collection = 'user_tweets' AND user_id = $user_id LIMIT $limit",
+            )
+            .bind(("user_id", user_id_owned.clone()))
+            .bind(("limit", limit))
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get user tweet ids: {}", e)))?;
+
+        #[derive(Deserialize)]
+        struct TweetIdRecord {
+            tweet_id: String,
+        }
+
+        let id_records: Vec<TweetIdRecord> = id_result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse tweet ids: {}", e)))?;
+
+        if id_records.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Fetch only the fields we need from these tweets
+        let record_refs: Vec<String> = id_records
+            .iter()
+            .map(|r| format!("tweet:⟨{}⟩", r.tweet_id))
+            .collect();
+        let query = format!(
+            "SELECT tweet_id, retweeted_tweet_id FROM [{}] WHERE retweeted_tweet_id IS NOT NONE",
+            record_refs.join(", ")
+        );
+
+        let mut result = self
+            .db
+            .query(&query)
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get retweets: {}", e)))?;
+
+        #[derive(Deserialize)]
+        struct RetweetRecord {
+            tweet_id: String,
+            retweeted_tweet_id: String,
+        }
+
+        let records: Vec<RetweetRecord> = result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse retweet records: {}", e)))?;
+
+        Ok(records
+            .into_iter()
+            .map(|r| (r.tweet_id, r.retweeted_tweet_id))
             .collect())
     }
 }
@@ -1528,7 +1732,7 @@ impl UserStore for SurrealDbStorage {
             .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse tweets: {}", e)))?;
 
-        records.into_iter().map(|r| r.try_into()).collect()
+        self.hydrate_tweet_records(records).await
     }
 
     async fn get_tweets_replying_to_user(
@@ -1554,7 +1758,7 @@ impl UserStore for SurrealDbStorage {
             .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse tweets: {}", e)))?;
 
-        records.into_iter().map(|r| r.try_into()).collect()
+        self.hydrate_tweet_records(records).await
     }
 }
 
@@ -1568,6 +1772,8 @@ struct ResonanceScoreRecord {
     bookmarked: bool,
     reply_count: u32,
     quote_count: u32,
+    #[serde(default)]
+    retweet_count: u32,
     computed_at: DateTime<Utc>,
 }
 
@@ -1581,6 +1787,7 @@ impl From<&ResonanceScore> for ResonanceScoreRecord {
             bookmarked: score.bookmarked,
             reply_count: score.reply_count,
             quote_count: score.quote_count,
+            retweet_count: score.retweet_count,
             computed_at: score.computed_at,
         }
     }
@@ -1596,6 +1803,7 @@ impl From<ResonanceScoreRecord> for ResonanceScore {
             bookmarked: record.bookmarked,
             reply_count: record.reply_count,
             quote_count: record.quote_count,
+            retweet_count: record.retweet_count,
             computed_at: record.computed_at,
         }
     }

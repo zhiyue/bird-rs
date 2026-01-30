@@ -98,6 +98,14 @@ pub trait TweetStore: Send + Sync {
         user_id: &str,
         limit: Option<u32>,
     ) -> Result<Vec<(String, String)>>;
+
+    /// Get user's tweets that are retweets.
+    /// Returns (tweet_id, retweeted_tweet_id) pairs.
+    async fn get_user_retweets(
+        &self,
+        user_id: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<(String, String)>>;
 }
 
 /// Trait for storing sync state.
@@ -155,30 +163,42 @@ pub struct ResonanceScore {
     pub user_id: String,
     /// Total resonance score.
     pub total: f64,
-    /// Whether the user liked this tweet (+0.5).
+    /// Whether the user liked this tweet.
     pub liked: bool,
-    /// Whether the user bookmarked this tweet (+1.0).
+    /// Whether the user bookmarked this tweet.
     pub bookmarked: bool,
-    /// Number of times the user replied to this tweet (+0.25 each).
+    /// Number of times the user replied to this tweet.
     pub reply_count: u32,
-    /// Number of times the user quoted this tweet (+0.75 each).
+    /// Number of times the user quoted this tweet.
     pub quote_count: u32,
+    /// Number of times the user retweeted this tweet.
+    #[serde(default)]
+    pub retweet_count: u32,
     /// When this score was computed.
     pub computed_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl ResonanceScore {
-    /// Resonance weight for a like.
-    pub const LIKE_WEIGHT: f64 = 0.5;
-    /// Resonance weight for a bookmark.
-    pub const BOOKMARK_WEIGHT: f64 = 1.0;
-    /// Resonance weight for a reply.
-    pub const REPLY_WEIGHT: f64 = 0.25;
-    /// Resonance weight for a quote.
+    // Weights ordered by effort/intent (likes are cheap, bookmarks show high intent)
+    /// Resonance weight for a like (lowest - just a click).
+    pub const LIKE_WEIGHT: f64 = 0.25;
+    /// Resonance weight for a reply (engagement).
+    pub const REPLY_WEIGHT: f64 = 0.5;
+    /// Resonance weight for a quote (sharing with commentary).
     pub const QUOTE_WEIGHT: f64 = 0.75;
+    /// Resonance weight for a retweet (sharing with followers).
+    pub const RETWEET_WEIGHT: f64 = 0.8;
+    /// Resonance weight for a bookmark (highest - saved for later).
+    pub const BOOKMARK_WEIGHT: f64 = 1.0;
 
     /// Calculate total score from components.
-    pub fn calculate_total(liked: bool, bookmarked: bool, reply_count: u32, quote_count: u32) -> f64 {
+    pub fn calculate_total(
+        liked: bool,
+        bookmarked: bool,
+        reply_count: u32,
+        quote_count: u32,
+        retweet_count: u32,
+    ) -> f64 {
         let mut total = 0.0;
         if liked {
             total += Self::LIKE_WEIGHT;
@@ -188,6 +208,7 @@ impl ResonanceScore {
         }
         total += reply_count as f64 * Self::REPLY_WEIGHT;
         total += quote_count as f64 * Self::QUOTE_WEIGHT;
+        total += retweet_count as f64 * Self::RETWEET_WEIGHT;
         total
     }
 
@@ -199,8 +220,9 @@ impl ResonanceScore {
         bookmarked: bool,
         reply_count: u32,
         quote_count: u32,
+        retweet_count: u32,
     ) -> Self {
-        let total = Self::calculate_total(liked, bookmarked, reply_count, quote_count);
+        let total = Self::calculate_total(liked, bookmarked, reply_count, quote_count, retweet_count);
         Self {
             tweet_id,
             user_id,
@@ -209,6 +231,7 @@ impl ResonanceScore {
             bookmarked,
             reply_count,
             quote_count,
+            retweet_count,
             computed_at: chrono::Utc::now(),
         }
     }

@@ -43,10 +43,11 @@ pub struct RateLimitInfo {
 impl Default for RateLimitConfig {
     fn default() -> Self {
         Self {
-            delay_ms: 1000,           // 1 second between pages
-            max_retries: 4,           // Try up to 4 times on 429
-            initial_backoff_ms: 1000, // Start with 1s backoff
-            max_backoff_ms: 16000,    // Cap at 16s backoff
+            // ~20 tweets per page, ~2-3 sec per tweet to skim = 40-60 sec per page
+            delay_ms: 45000,           // 45 seconds between pages (human-like)
+            max_retries: 3,            // Try up to 3 times on 429 (then respect the limit)
+            initial_backoff_ms: 60000, // Start with 60s backoff if no reset header
+            max_backoff_ms: 900000,    // Cap at 15 minutes (typical Twitter rate limit window)
             stats: Arc::new(Mutex::new(RateLimitInfo::default())),
         }
     }
@@ -674,6 +675,7 @@ impl TwitterClient {
     }
 
     /// Fetch with exponential backoff on rate limit errors.
+    /// Uses x-rate-limit-reset header when available for smart waiting.
     async fn fetch_with_backoff<F, Fut>(
         fetch_fn: &F,
         cursor: Option<String>,
@@ -690,19 +692,46 @@ impl TwitterClient {
             match fetch_fn(cursor.clone()).await {
                 Ok(result) => return Ok(result),
                 Err(e) => {
-                    // Check if it's a rate limit error (429)
-                    let is_rate_limit = e.to_string().contains("429")
-                        || e.to_string().to_lowercase().contains("rate limit");
+                    // Check if it's a rate limit error with optional reset timestamp
+                    let (is_rate_limit, reset_at) = match &e {
+                        bird_core::Error::RateLimited(reset) => (true, *reset),
+                        other => {
+                            let msg = other.to_string().to_lowercase();
+                            (msg.contains("429") || msg.contains("rate limit"), None)
+                        }
+                    };
 
                     if is_rate_limit && retries < rate_limit.max_retries {
                         retries += 1;
-                        rate_limit.record_rate_limit(backoff_ms, retries);
-                        eprintln!(
-                            "Rate limited, backing off for {}ms (attempt {}/{})",
-                            backoff_ms, retries, rate_limit.max_retries
-                        );
-                        sleep(Duration::from_millis(backoff_ms)).await;
-                        // Exponential backoff with cap
+
+                        // Calculate wait time: use reset timestamp if available, else exponential backoff
+                        let wait_ms = if let Some(reset_timestamp) = reset_at {
+                            let now = Utc::now().timestamp();
+                            let wait_secs = (reset_timestamp - now).max(1);
+                            // Add a small buffer (5 seconds) to ensure we're past the reset
+                            ((wait_secs + 5) * 1000) as u64
+                        } else {
+                            backoff_ms
+                        };
+
+                        rate_limit.record_rate_limit(wait_ms, retries);
+
+                        if reset_at.is_some() {
+                            let wait_secs = wait_ms / 1000;
+                            eprintln!(
+                                "Rate limited, waiting {}s until reset (attempt {}/{})",
+                                wait_secs, retries, rate_limit.max_retries
+                            );
+                        } else {
+                            eprintln!(
+                                "Rate limited, backing off for {}ms (attempt {}/{})",
+                                wait_ms, retries, rate_limit.max_retries
+                            );
+                        }
+
+                        sleep(Duration::from_millis(wait_ms)).await;
+
+                        // Exponential backoff for next attempt (only used if no reset timestamp)
                         backoff_ms = (backoff_ms * 2).min(rate_limit.max_backoff_ms);
                     } else {
                         return Err(e);
@@ -761,6 +790,7 @@ mod tests {
             in_reply_to_user_id: None,
             mentions: Vec::new(),
             quoted_tweet: None,
+            retweeted_tweet: None,
             media: None,
             article: None,
             headline: None,

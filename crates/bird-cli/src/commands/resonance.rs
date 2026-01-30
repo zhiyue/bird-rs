@@ -14,14 +14,11 @@ const DEFAULT_MAX_PER_COLLECTION: u32 = 5000;
 /// Get the user_id from existing sync states in the database.
 /// This allows resonance commands to run fully offline.
 async fn get_user_id_offline(storage: &Arc<dyn bird_storage::Storage>) -> anyhow::Result<String> {
-    storage
-        .get_any_synced_user_id()
-        .await?
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "No synced data found. Run 'bird sync likes' or 'bird sync bookmarks' first."
-            )
-        })
+    storage.get_any_synced_user_id().await?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "No synced data found. Run 'bird sync likes' or 'bird sync bookmarks' first."
+        )
+    })
 }
 
 /// Run the resonance refresh command (fully offline).
@@ -63,6 +60,7 @@ pub async fn run_refresh(
             bookmarks: usize,
             replies: usize,
             quotes: usize,
+            retweets: usize,
         }
 
         let json = RefreshResultJson {
@@ -74,6 +72,7 @@ pub async fn run_refresh(
                 bookmarks: stats.bookmarks,
                 replies: stats.replies,
                 quotes: stats.quotes,
+                retweets: stats.retweets,
             },
         };
         println!("{}", format_json(&json));
@@ -87,11 +86,13 @@ pub async fn run_refresh(
     let like_icon = if show_emoji { "❤️  " } else { "  " };
     let bookmark_icon = if show_emoji { "🔖 " } else { "  " };
     let reply_icon = if show_emoji { "💬 " } else { "  " };
-    let quote_icon = if show_emoji { "🔁 " } else { "  " };
+    let quote_icon = if show_emoji { "💬 " } else { "  " };
+    let retweet_icon = if show_emoji { "🔁 " } else { "  " };
     println!("    {}Likes: {}", like_icon, stats.likes);
     println!("    {}Bookmarks: {}", bookmark_icon, stats.bookmarks);
     println!("    {}Replies: {}", reply_icon, stats.replies);
     println!("    {}Quotes: {}", quote_icon, stats.quotes);
+    println!("    {}Retweets: {}", retweet_icon, stats.retweets);
     println!();
     println!(
         "  Unique tweets with interactions: {}",
@@ -107,10 +108,7 @@ pub async fn run_refresh(
     }
 
     println!();
-    println!(
-        "Use {} to see scores.",
-        "bird list --columns score".cyan()
-    );
+    println!("Use {} to see scores.", "bird list --columns score".cyan());
 
     Ok(())
 }

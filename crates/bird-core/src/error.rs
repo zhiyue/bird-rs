@@ -40,9 +40,9 @@ pub enum Error {
     #[error("Twitter API error: {0}")]
     ApiError(String),
 
-    /// Rate limited.
-    #[error("Rate limited by Twitter API")]
-    RateLimited,
+    /// Rate limited with optional reset timestamp.
+    #[error("Rate limited by Twitter API{}", .0.map(|ts| format!(" (resets at {})", ts)).unwrap_or_default())]
+    RateLimited(Option<i64>),
 
     /// Request timed out.
     #[error("Request timed out")]

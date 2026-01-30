@@ -201,6 +201,7 @@ mod tests {
             in_reply_to_user_id: None,
             mentions: vec![],
             quoted_tweet: None,
+            retweeted_tweet: None,
             media: None,
             article: None,
             headline,

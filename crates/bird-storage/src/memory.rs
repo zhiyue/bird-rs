@@ -236,7 +236,10 @@ impl TweetStore for MemoryStorage {
             .read()
             .map_err(|e| Error::Storage(e.to_string()))?;
 
-        Ok(ids.iter().filter_map(|id| tweets.get(*id).cloned()).collect())
+        Ok(ids
+            .iter()
+            .filter_map(|id| tweets.get(*id).cloned())
+            .collect())
     }
 
     async fn get_collection_tweet_ids(
@@ -325,6 +328,43 @@ impl TweetStore for MemoryStorage {
                         t.quoted_tweet
                             .as_ref()
                             .map(|qt| (t.id.clone(), qt.id.clone()))
+                    })
+                })
+                .take(limit)
+                .collect();
+            Ok(results)
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    async fn get_user_retweets(
+        &self,
+        user_id: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<(String, String)>> {
+        let collections = self
+            .collections
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+        let tweets = self
+            .tweets
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+
+        let key = ("user_tweets".to_string(), user_id.to_string());
+        let tweet_ids = collections.get(&key);
+
+        let limit = limit.map(|l| l as usize).unwrap_or(usize::MAX);
+
+        if let Some(ids) = tweet_ids {
+            let results: Vec<(String, String)> = ids
+                .iter()
+                .filter_map(|id| {
+                    tweets.get(id).and_then(|t| {
+                        t.retweeted_tweet
+                            .as_ref()
+                            .map(|rt| (t.id.clone(), rt.id.clone()))
                     })
                 })
                 .take(limit)
@@ -526,7 +566,11 @@ impl ResonanceStore for MemoryStorage {
             .collect();
 
         // Sort by total descending
-        user_scores.sort_by(|a, b| b.total.partial_cmp(&a.total).unwrap_or(std::cmp::Ordering::Equal));
+        user_scores.sort_by(|a, b| {
+            b.total
+                .partial_cmp(&a.total)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         Ok(user_scores.into_iter().skip(offset).take(limit).collect())
     }
@@ -611,6 +655,7 @@ mod tests {
             in_reply_to_user_id: None,
             mentions: Vec::new(),
             quoted_tweet: None,
+            retweeted_tweet: None,
             media: None,
             article: None,
             headline: None,
@@ -643,6 +688,7 @@ mod tests {
             in_reply_to_user_id: None,
             mentions: Vec::new(),
             quoted_tweet: None,
+            retweeted_tweet: None,
             media: None,
             article: None,
             headline: None,
@@ -702,6 +748,7 @@ mod tests {
             in_reply_to_user_id: Some("u1".to_string()),
             mentions: vec![user],
             quoted_tweet: None,
+            retweeted_tweet: None,
             media: None,
             article: None,
             headline: None,

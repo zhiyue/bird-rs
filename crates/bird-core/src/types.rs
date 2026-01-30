@@ -106,6 +106,9 @@ pub struct TweetData {
     /// Quoted tweet (nested, depth controlled by quote_depth).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quoted_tweet: Option<Box<TweetData>>,
+    /// Retweeted tweet (the original tweet that was retweeted).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retweeted_tweet: Option<Box<TweetData>>,
     /// Media attachments.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media: Option<Vec<TweetMedia>>,

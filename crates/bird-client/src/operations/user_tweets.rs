@@ -58,7 +58,13 @@ impl TwitterClient {
                 .map_err(|e| Error::HttpRequest(e.to_string()))?;
 
             if response.status() == 429 {
-                return Err(Error::RateLimited);
+                // Try to extract the rate limit reset timestamp from headers
+                let reset_at = response
+                    .headers()
+                    .get("x-rate-limit-reset")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<i64>().ok());
+                return Err(Error::RateLimited(reset_at));
             }
 
             if response.status() == 404 {

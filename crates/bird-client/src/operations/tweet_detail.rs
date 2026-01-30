@@ -37,7 +37,12 @@ impl TwitterClient {
         }
 
         if response.status() == 429 {
-            return Err(Error::RateLimited);
+            let reset_at = response
+                .headers()
+                .get("x-rate-limit-reset")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse::<i64>().ok());
+            return Err(Error::RateLimited(reset_at));
         }
 
         if !response.status().is_success() {
@@ -195,6 +200,17 @@ pub(crate) fn parse_tweet_result(
         None
     };
 
+    // Parse retweeted tweet (the original tweet that was retweeted)
+    // This is in legacy/retweeted_status_result/result
+    let retweeted_tweet = if current_depth < max_quote_depth {
+        legacy
+            .and_then(|l| l.pointer("/retweeted_status_result/result"))
+            .and_then(|r| parse_tweet_result(r, max_quote_depth, current_depth + 1).ok())
+            .map(Box::new)
+    } else {
+        None
+    };
+
     // Parse in_reply_to_user_id from legacy data
     let in_reply_to_user_id = legacy
         .and_then(|l| l.get("in_reply_to_user_id_str"))
@@ -218,6 +234,7 @@ pub(crate) fn parse_tweet_result(
         in_reply_to_user_id,
         mentions,
         quoted_tweet,
+        retweeted_tweet,
         media,
         article,
         headline: None,

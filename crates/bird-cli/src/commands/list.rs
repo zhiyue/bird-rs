@@ -307,7 +307,11 @@ fn format_column(
         Column::Liked => {
             let liked = resonance.map(|r| r.liked).unwrap_or(false);
             let display = if liked {
-                if show_emoji { "❤️".to_string() } else { "Y".to_string() }
+                if show_emoji {
+                    "❤️".to_string()
+                } else {
+                    "Y".to_string()
+                }
             } else {
                 "-".to_string()
             };
@@ -317,7 +321,11 @@ fn format_column(
         Column::Bookmarked => {
             let bookmarked = resonance.map(|r| r.bookmarked).unwrap_or(false);
             let display = if bookmarked {
-                if show_emoji { "🔖".to_string() } else { "Y".to_string() }
+                if show_emoji {
+                    "🔖".to_string()
+                } else {
+                    "Y".to_string()
+                }
             } else {
                 "-".to_string()
             };

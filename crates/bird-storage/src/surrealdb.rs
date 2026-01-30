@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use bird_core::{
     Error, MentionedUser, ResonanceScore, ResonanceStore, Result, SyncState, SyncStateStore,
-    TweetAuthor, TweetData, TweetStore, UserStore,
+    TweetAuthor, TweetData, TweetStore, TweetWithCollections, UserStore,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -1526,6 +1526,95 @@ impl TweetStore for SurrealDbStorage {
             .into_iter()
             .map(|r| (r.tweet_id, r.retweeted_tweet_id))
             .collect())
+    }
+
+    async fn get_tweets_interleaved(
+        &self,
+        collections: &[&str],
+        user_id: &str,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Result<Vec<TweetWithCollections>> {
+        let user_id_owned = user_id.to_string();
+        let limit = limit.unwrap_or(100);
+        let offset = offset.unwrap_or(0);
+
+        // Build list of collection placeholders for query
+        let collection_placeholders: Vec<String> =
+            collections.iter().map(|_| "$".to_string()).collect();
+        let collection_param_list = collection_placeholders.join(", ");
+
+        // Query: get unique tweets from all collections with their collection memberships
+        let query = format!(
+            "SELECT
+                tweet_id,
+                array::distinct(array::flatten(array::group(collection))) as collections,
+                time::min(array::group(added_at)) as first_seen_at
+            FROM tweet_collection
+            WHERE collection IN [{}] AND user_id = $user_id
+            GROUP BY tweet_id
+            ORDER BY first_seen_at DESC
+            LIMIT $limit START $offset",
+            collection_param_list
+        );
+
+        let mut query_builder = self.db.query(&query);
+
+        // Bind collection parameters
+        for (i, collection) in collections.iter().enumerate() {
+            query_builder =
+                query_builder.bind((format!("collection{}", i), collection.to_string()));
+        }
+
+        let mut result = query_builder
+            .bind(("user_id", user_id_owned.clone()))
+            .bind(("limit", limit))
+            .bind(("offset", offset))
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to get interleaved tweets: {}", e)))?;
+
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct CollectionRecord {
+            tweet_id: String,
+            collections: Vec<String>,
+            first_seen_at: Option<DateTime<Utc>>,
+        }
+
+        let collection_records: Vec<CollectionRecord> = result
+            .take(0)
+            .map_err(|e| Error::Storage(format!("Failed to parse collection records: {}", e)))?;
+
+        // Now fetch the actual tweets
+        let tweet_ids: Vec<&str> = collection_records
+            .iter()
+            .map(|r| r.tweet_id.as_str())
+            .collect();
+
+        if tweet_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let tweets = self.get_tweets_by_ids(&tweet_ids).await?;
+
+        // Build a map of tweet_id -> tweet for fast lookup
+        let tweet_map: std::collections::HashMap<String, TweetData> =
+            tweets.into_iter().map(|t| (t.id.clone(), t)).collect();
+
+        // Combine tweets with their collections
+        let results: Vec<TweetWithCollections> = collection_records
+            .into_iter()
+            .filter_map(|record| {
+                tweet_map
+                    .get(&record.tweet_id)
+                    .map(|tweet| TweetWithCollections {
+                        tweet: tweet.clone(),
+                        collections: record.collections,
+                    })
+            })
+            .collect();
+
+        Ok(results)
     }
 }
 

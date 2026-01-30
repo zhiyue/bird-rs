@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use bird_core::{
     Error, MentionedUser, ResonanceScore, ResonanceStore, Result, SyncState, SyncStateStore,
-    TweetData, TweetStore, UserStore,
+    TweetData, TweetStore, TweetWithCollections, UserStore,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
@@ -373,6 +373,65 @@ impl TweetStore for MemoryStorage {
         } else {
             Ok(Vec::new())
         }
+    }
+
+    async fn get_tweets_interleaved(
+        &self,
+        collections: &[&str],
+        user_id: &str,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Result<Vec<TweetWithCollections>> {
+        let collections_map = self
+            .collections
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+        let tweets = self
+            .tweets
+            .read()
+            .map_err(|e| Error::Storage(e.to_string()))?;
+
+        let mut seen_ids = HashSet::new();
+        let mut result = Vec::new();
+
+        // Collect all tweets with their collection memberships
+        for collection in collections {
+            let key = (collection.to_string(), user_id.to_string());
+            if let Some(ids) = collections_map.get(&key) {
+                for id in ids {
+                    if seen_ids.insert(id.clone()) {
+                        if let Some(tweet) = tweets.get(id) {
+                            result.push((id.clone(), tweet.clone(), vec![collection.to_string()]));
+                        }
+                    } else {
+                        // Add collection to existing tweet
+                        if let Some(entry) =
+                            result.iter_mut().find(|(entry_id, _, _)| entry_id == id)
+                        {
+                            if !entry.2.contains(&collection.to_string()) {
+                                entry.2.push(collection.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Apply pagination
+        let offset = offset.unwrap_or(0) as usize;
+        let limit = limit.unwrap_or(100) as usize;
+
+        let results: Vec<TweetWithCollections> = result
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .map(|(_, tweet, colls)| TweetWithCollections {
+                tweet,
+                collections: colls,
+            })
+            .collect();
+
+        Ok(results)
     }
 }
 

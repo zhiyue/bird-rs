@@ -288,3 +288,14 @@ impl std::str::FromStr for Collection {
         }
     }
 }
+
+/// Tweet with its collection memberships for interleaved view.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TweetWithCollections {
+    /// Tweet data.
+    #[serde(flatten)]
+    pub tweet: TweetData,
+    /// Collections this tweet belongs to.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub collections: Vec<String>,
+}

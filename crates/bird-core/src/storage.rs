@@ -2,7 +2,7 @@
 
 use crate::error::Result;
 use crate::pagination::SyncState;
-use crate::types::{MentionedUser, TweetData};
+use crate::types::{MentionedUser, TweetData, TweetWithCollections};
 use async_trait::async_trait;
 
 /// Trait for storing and retrieving tweets.
@@ -106,6 +106,16 @@ pub trait TweetStore: Send + Sync {
         user_id: &str,
         limit: Option<u32>,
     ) -> Result<Vec<(String, String)>>;
+
+    /// Get tweets from multiple collections in interleaved view (deduped, earliest first_seen_at).
+    /// Returns tweets with their collection memberships, ordered by earliest appearance time.
+    async fn get_tweets_interleaved(
+        &self,
+        collections: &[&str],
+        user_id: &str,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Result<Vec<TweetWithCollections>>;
 }
 
 /// Trait for storing sync state.

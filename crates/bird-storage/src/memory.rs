@@ -828,4 +828,90 @@ mod tests {
             .unwrap();
         assert_eq!(replies.len(), 1);
     }
+
+    #[tokio::test]
+    async fn test_get_tweets_interleaved() {
+        let storage = MemoryStorage::new();
+        let user_id = "user1";
+
+        // Create 3 tweets
+        let tweet1 = TweetData {
+            id: "1".to_string(),
+            text: "Tweet 1".to_string(),
+            author: bird_core::TweetAuthor {
+                username: "test".to_string(),
+                name: "Test".to_string(),
+            },
+            author_id: None,
+            created_at: None,
+            reply_count: None,
+            retweet_count: None,
+            like_count: None,
+            conversation_id: None,
+            in_reply_to_status_id: None,
+            in_reply_to_user_id: None,
+            mentions: Vec::new(),
+            quoted_tweet: None,
+            retweeted_tweet: None,
+            media: None,
+            article: None,
+            headline: None,
+            _raw: None,
+        };
+
+        let tweet2 = TweetData {
+            id: "2".to_string(),
+            text: "Tweet 2".to_string(),
+            ..tweet1.clone()
+        };
+
+        let tweet3 = TweetData {
+            id: "3".to_string(),
+            text: "Tweet 3".to_string(),
+            ..tweet1.clone()
+        };
+
+        storage.upsert_tweet(&tweet1).await.unwrap();
+        storage.upsert_tweet(&tweet2).await.unwrap();
+        storage.upsert_tweet(&tweet3).await.unwrap();
+
+        // Add tweets to different collections
+        storage
+            .add_to_collection("1", "likes", user_id)
+            .await
+            .unwrap();
+        storage
+            .add_to_collection("2", "bookmarks", user_id)
+            .await
+            .unwrap();
+        storage
+            .add_to_collection("3", "likes", user_id)
+            .await
+            .unwrap();
+        storage
+            .add_to_collection("3", "bookmarks", user_id)
+            .await
+            .unwrap();
+
+        // Get interleaved tweets
+        let result = storage
+            .get_tweets_interleaved(&["likes", "bookmarks"], user_id, None, None)
+            .await
+            .unwrap();
+
+        // Should get 3 unique tweets
+        assert_eq!(result.len(), 3);
+
+        // Check collections are properly associated
+        let tweet_ids: Vec<&str> = result.iter().map(|t| t.tweet.id.as_str()).collect();
+        assert!(tweet_ids.contains(&"1"));
+        assert!(tweet_ids.contains(&"2"));
+        assert!(tweet_ids.contains(&"3"));
+
+        // Check tweet 3 has both collections
+        let tweet3_result = result.iter().find(|t| t.tweet.id == "3").unwrap();
+        assert_eq!(tweet3_result.collections.len(), 2);
+        assert!(tweet3_result.collections.contains(&"likes".to_string()));
+        assert!(tweet3_result.collections.contains(&"bookmarks".to_string()));
+    }
 }

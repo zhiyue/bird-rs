@@ -219,7 +219,11 @@ impl ResonanceScore {
         // Base score from passive interactions
         let base = 1.0
             + (if liked { Self::LIKE_WEIGHT } else { 0.0 })
-            + (if bookmarked { Self::BOOKMARK_WEIGHT } else { 0.0 });
+            + (if bookmarked {
+                Self::BOOKMARK_WEIGHT
+            } else {
+                0.0
+            });
 
         // Multiplier from active interactions
         let active_multiplier = 1.0
@@ -300,3 +304,81 @@ pub trait Storage: TweetStore + SyncStateStore + UserStore + ResonanceStore {}
 
 /// Blanket implementation for types that implement all traits.
 impl<T: TweetStore + SyncStateStore + UserStore + ResonanceStore> Storage for T {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resonance_just_liked() {
+        // Just liked: base = 1.0 + 0.25 = 1.25, multiplier = 1.0, synergy = 1.0
+        let score = ResonanceScore::calculate_total(true, false, 0, 0, 0);
+        assert!((score - 1.25).abs() < 0.001, "Expected ~1.25, got {}", score);
+    }
+
+    #[test]
+    fn test_resonance_just_bookmarked() {
+        // Just bookmarked: base = 1.0 + 1.0 = 2.0, multiplier = 1.0, synergy = 1.0
+        let score = ResonanceScore::calculate_total(false, true, 0, 0, 0);
+        assert!((score - 2.0).abs() < 0.001, "Expected ~2.0, got {}", score);
+    }
+
+    #[test]
+    fn test_resonance_liked_and_bookmarked() {
+        // Liked + bookmarked: base = 1.0 + 0.25 + 1.0 = 2.25, multiplier = 1.0, synergy = 1.5
+        // Total: 2.25 * 1.0 * 1.5 = 3.375
+        let score = ResonanceScore::calculate_total(true, true, 0, 0, 0);
+        assert!(
+            (score - 3.375).abs() < 0.001,
+            "Expected ~3.375, got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_resonance_liked_bookmarked_with_reply() {
+        // Liked + bookmarked + 1 reply:
+        // base = 2.25, multiplier = 1.0 + 1*0.5 = 1.5, synergy = 1.5
+        // Total: 2.25 * 1.5 * 1.5 = 5.0625
+        let score = ResonanceScore::calculate_total(true, true, 1, 0, 0);
+        assert!(
+            (score - 5.0625).abs() < 0.001,
+            "Expected ~5.0625, got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_resonance_no_interactions() {
+        // No interactions: base = 1.0, multiplier = 1.0, synergy = 1.0
+        let score = ResonanceScore::calculate_total(false, false, 0, 0, 0);
+        assert!(
+            (score - 1.0).abs() < 0.001,
+            "Expected ~1.0, got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_resonance_only_active() {
+        // Only 2 replies: base = 1.0, multiplier = 1.0 + 2*0.5 = 2.0, synergy = 1.0
+        // Total: 1.0 * 2.0 * 1.0 = 2.0
+        let score = ResonanceScore::calculate_total(false, false, 2, 0, 0);
+        assert!((score - 2.0).abs() < 0.001, "Expected ~2.0, got {}", score);
+    }
+
+    #[test]
+    fn test_resonance_complex_scenario() {
+        // Liked + bookmarked + 1 reply + 2 quotes + 1 retweet:
+        // base = 2.25
+        // multiplier = 1.0 + 1*0.5 + 2*0.75 + 1*0.8 = 1.0 + 0.5 + 1.5 + 0.8 = 3.8
+        // synergy = 1.5
+        // Total: 2.25 * 3.8 * 1.5 = 12.825
+        let score = ResonanceScore::calculate_total(true, true, 1, 2, 1);
+        assert!(
+            (score - 12.825).abs() < 0.001,
+            "Expected ~12.825, got {}",
+            score
+        );
+    }
+}

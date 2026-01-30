@@ -41,13 +41,10 @@ bird sync likes
 | `bird sync bookmarks` | Sync bookmarks to local DB    |
 | `bird sync posts`     | Sync your own tweets to DB    |
 | `bird sync status`    | Show sync progress            |
-| `bird resonance refresh` | Compute resonance scores   |
 | `bird db repair`      | Heal missing data: backfill headlines and recalculate resonance scores |
 | `bird insights generate` | Analyze tweets with LLM    |
 | `bird db status`      | Show database status and counts |
 | `bird db optimize`    | Ensure schema and indexes exist |
-| `bird db backfill-created-at` | Backfill timestamps for stored tweets |
-| `bird db backfill-headlines` | Generate headlines for long tweets |
 | `bird config init`    | Write a default config file   |
 
 ## Sync
@@ -264,14 +261,6 @@ Generate a starter config with:
 bird config init
 # Overwrite existing file
 bird config init --force
-```
-
-## Migrations
-
-If you upgraded from a version without `created_at_ts`, run:
-
-```bash
-bird db backfill-created-at
 ```
 
 ## Authentication

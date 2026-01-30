@@ -6,36 +6,11 @@ use crate::insights::llm::claude_code::ClaudeCodeProvider;
 use crate::insights::llm::LlmProvider;
 use crate::output::format_json;
 use crate::resonance::{get_interaction_stats, refresh_resonance_scores};
-use bird_storage::{StorageConfig, SurrealDbStorage, TweetStore};
+use bird_storage::{StorageConfig, SurrealDbStorage};
 use chrono::{TimeZone, Utc};
 use colored::Colorize;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-
-/// Backfill created_at_ts values for existing tweets.
-pub async fn run_backfill_created_at(
-    cli: &Cli,
-    batch_size: Option<u32>,
-    show_emoji: bool,
-) -> anyhow::Result<()> {
-    let StorageConfig::SurrealDb(db_config) = cli.storage_config()? else {
-        anyhow::bail!("Backfill requires SurrealDB storage");
-    };
-
-    let storage = SurrealDbStorage::new_with_config(&db_config).await?;
-    let batch = batch_size.unwrap_or(200);
-    let result = storage.backfill_created_at_ts(batch).await?;
-
-    let icon = if show_emoji { "🛠️  " } else { "" };
-    println!(
-        "{}Backfill complete: {} updated, {} skipped",
-        icon,
-        result.updated.to_string().green().bold(),
-        result.skipped.to_string().yellow()
-    );
-
-    Ok(())
-}
 
 /// Show database status and counts.
 pub async fn run_status(cli: &Cli, show_emoji: bool, debug: bool) -> anyhow::Result<()> {
@@ -431,103 +406,6 @@ fn format_timestamp(timestamp: Option<i64>) -> Option<String> {
 }
 
 /// Backfill headlines for long tweets using LLM.
-pub async fn run_backfill_headlines(
-    cli: &Cli,
-    min_length: usize,
-    batch_size: u32,
-    max_tweets: Option<u32>,
-    provider: String,
-    model: Option<String>,
-    show_emoji: bool,
-) -> anyhow::Result<()> {
-    let StorageConfig::SurrealDb(db_config) = cli.storage_config()? else {
-        anyhow::bail!("Backfill headlines requires SurrealDB storage");
-    };
-
-    let storage = SurrealDbStorage::new_with_config(&db_config).await?;
-
-    // Create LLM provider
-    let llm: Box<dyn LlmProvider> = match provider.as_str() {
-        "claude-code" => Box::new(ClaudeCodeProvider::new(model)),
-        _ => anyhow::bail!("Unsupported provider: {}. Use 'claude-code'.", provider),
-    };
-
-    let icon = if show_emoji { "📝 " } else { "" };
-    println!(
-        "{}Backfilling headlines for tweets with text > {} chars",
-        icon, min_length
-    );
-    println!("  Using {} ({})", llm.name(), llm.model());
-    println!();
-
-    let mut total_processed = 0u32;
-    let mut total_generated = 0usize;
-
-    loop {
-        // Check if we've hit the max
-        if let Some(max) = max_tweets {
-            if total_processed >= max {
-                break;
-            }
-        }
-
-        // Calculate how many to fetch this batch
-        let remaining = max_tweets.map(|m| m - total_processed);
-        let fetch_limit = match remaining {
-            Some(r) => std::cmp::min(batch_size, r),
-            None => batch_size,
-        };
-
-        // Get tweets missing headlines
-        let tweets = storage
-            .get_tweets_missing_headlines(min_length, Some(fetch_limit))
-            .await?;
-
-        if tweets.is_empty() {
-            break;
-        }
-
-        println!(
-            "  Processing batch of {} tweets (total: {})...",
-            tweets.len(),
-            total_processed
-        );
-
-        // Generate headlines
-        let tweet_refs: Vec<_> = tweets.iter().collect();
-        match generate_headlines(&tweet_refs, llm.as_ref()).await {
-            Ok(headlines) => {
-                if !headlines.is_empty() {
-                    // Store headlines
-                    let headline_pairs: Vec<(String, String)> = headlines.into_iter().collect();
-                    let updated = storage.update_tweet_headlines(&headline_pairs).await?;
-                    total_generated += updated;
-                    println!(
-                        "    {} Generated {} headlines",
-                        "✓".green(),
-                        updated.to_string().bold()
-                    );
-                }
-            }
-            Err(e) => {
-                eprintln!("    {} Failed to generate headlines: {}", "✗".red(), e);
-            }
-        }
-
-        total_processed += tweets.len() as u32;
-    }
-
-    println!();
-    println!(
-        "{}Backfill complete: {} headlines generated for {} tweets",
-        icon,
-        total_generated.to_string().green().bold(),
-        total_processed.to_string().cyan()
-    );
-
-    Ok(())
-}
-
 /// Repair missing data: backfill headlines and recalculate resonance scores.
 pub async fn run_repair(
     cli: &Cli,

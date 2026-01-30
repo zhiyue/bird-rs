@@ -58,7 +58,7 @@ bird list user_tweets          # List only your posts
 bird list --columns id,text,collections,score,liked,bookmarked
 bird list likes --columns id,headline,score
 
-# Pagination options
+# Options
 bird list --page-size 50       # Custom page size
 bird list --json               # JSON output
 ```
@@ -84,26 +84,6 @@ bird db optimize               # Ensure schema/indexes exist
 # Repair: heal missing data (headlines + resonance scores)
 bird db repair                 # Backfill headlines and recalculate all scores
 bird db repair --min-length 300 # Only generate headlines for tweets >300 chars
-
-# Individual maintenance commands
-bird db backfill-created-at    # Backfill timestamps
-bird db backfill-headlines     # Generate headlines for long tweets
-bird db backfill-headlines --max-tweets 100
-```
-
-### Resonance Scoring
-
-```bash
-# Compute scores based on your interactions (likes, bookmarks, replies, quotes, retweets)
-bird resonance refresh
-
-# View scores with interactions (synergy bonus when both liked and bookmarked)
-bird list --columns id,text,liked,bookmarked,score
-
-# Score formula: base × active_multiplier × synergy_multiplier
-# Base = 1.0 + like×0.25 + bookmark×1.0
-# Active = 1.0 + reply×0.5 + quote×0.75 + retweet×0.8
-# Synergy = 1.5 if both liked AND bookmarked, else 1.0
 ```
 
 ## Options

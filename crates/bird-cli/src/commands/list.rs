@@ -162,7 +162,12 @@ pub async fn run(
     let (tweets, tweet_collections_map, total) = if is_interleaved {
         // Interleaved view: fetch from all collections
         let interleaved_tweets = storage
-            .get_tweets_interleaved(&["likes", "bookmarks", "user_tweets"], &user_id, Some(size), Some(offset))
+            .get_tweets_interleaved(
+                &["likes", "bookmarks", "user_tweets"],
+                &user_id,
+                Some(size),
+                Some(offset),
+            )
             .await?;
 
         // For interleaved, we need a different total count
@@ -170,14 +175,18 @@ pub async fn run(
         let likes_count = storage.collection_count("likes", &user_id).await? as usize;
         let bookmarks_count = storage.collection_count("bookmarks", &user_id).await? as usize;
         let user_tweets_count = storage.collection_count("user_tweets", &user_id).await? as usize;
-        let total_estimate = (likes_count + bookmarks_count + user_tweets_count).max(interleaved_tweets.len()) as u64;
+        let total_estimate = (likes_count + bookmarks_count + user_tweets_count)
+            .max(interleaved_tweets.len()) as u64;
 
         let tweet_collections: HashMap<String, Vec<String>> = interleaved_tweets
             .iter()
             .map(|twc| (twc.tweet.id.clone(), twc.collections.clone()))
             .collect();
 
-        let tweets: Vec<TweetData> = interleaved_tweets.into_iter().map(|twc| twc.tweet).collect();
+        let tweets: Vec<TweetData> = interleaved_tweets
+            .into_iter()
+            .map(|twc| twc.tweet)
+            .collect();
 
         (tweets, tweet_collections, total_estimate)
     } else {

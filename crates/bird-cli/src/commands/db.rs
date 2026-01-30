@@ -546,12 +546,11 @@ pub async fn run_repair(
     let storage = cli.create_storage().await?;
 
     // Get user ID from local sync state
-    let user_id = storage
-        .get_any_synced_user_id()
-        .await?
-        .ok_or_else(|| anyhow::anyhow!(
+    let user_id = storage.get_any_synced_user_id().await?.ok_or_else(|| {
+        anyhow::anyhow!(
             "No synced data found. Run 'bird sync likes' or 'bird sync bookmarks' first."
-        ))?;
+        )
+    })?;
 
     // Step 1: Backfill headlines
     println!("{}Step 1: Backfilling missing headlines...", icon);
@@ -598,7 +597,11 @@ pub async fn run_repair(
                     let headline_pairs: Vec<(String, String)> = headlines.into_iter().collect();
                     let updated = storage.update_tweet_headlines(&headline_pairs).await?;
                     total_generated += updated;
-                    println!("    {} Generated {} headlines", "✓".green(), updated.to_string().bold());
+                    println!(
+                        "    {} Generated {} headlines",
+                        "✓".green(),
+                        updated.to_string().bold()
+                    );
                 }
             }
             Err(e) => {

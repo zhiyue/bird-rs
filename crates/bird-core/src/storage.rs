@@ -313,7 +313,11 @@ mod tests {
     fn test_resonance_just_liked() {
         // Just liked: base = 1.0 + 0.25 = 1.25, multiplier = 1.0, synergy = 1.0
         let score = ResonanceScore::calculate_total(true, false, 0, 0, 0);
-        assert!((score - 1.25).abs() < 0.001, "Expected ~1.25, got {}", score);
+        assert!(
+            (score - 1.25).abs() < 0.001,
+            "Expected ~1.25, got {}",
+            score
+        );
     }
 
     #[test]
@@ -352,11 +356,7 @@ mod tests {
     fn test_resonance_no_interactions() {
         // No interactions: base = 1.0, multiplier = 1.0, synergy = 1.0
         let score = ResonanceScore::calculate_total(false, false, 0, 0, 0);
-        assert!(
-            (score - 1.0).abs() < 0.001,
-            "Expected ~1.0, got {}",
-            score
-        );
+        assert!((score - 1.0).abs() < 0.001, "Expected ~1.0, got {}", score);
     }
 
     #[test]

@@ -267,43 +267,12 @@ impl ResonanceScore {
     }
 }
 
-/// Trait for storing resonance scores.
-#[async_trait]
-pub trait ResonanceStore: Send + Sync {
-    /// Get resonance score for a specific tweet.
-    async fn get_resonance_score(
-        &self,
-        tweet_id: &str,
-        user_id: &str,
-    ) -> Result<Option<ResonanceScore>>;
-
-    /// Get top resonance scores for a user, ordered by total descending.
-    async fn get_top_resonance_scores(
-        &self,
-        user_id: &str,
-        limit: u32,
-        offset: Option<u32>,
-    ) -> Result<Vec<ResonanceScore>>;
-
-    /// Insert or update a single resonance score.
-    async fn upsert_resonance_score(&self, score: &ResonanceScore) -> Result<()>;
-
-    /// Insert or update multiple resonance scores.
-    async fn upsert_resonance_scores(&self, scores: &[ResonanceScore]) -> Result<usize>;
-
-    /// Clear all resonance scores for a user.
-    async fn clear_resonance_scores(&self, user_id: &str) -> Result<u64>;
-
-    /// Get count of resonance scores for a user.
-    async fn resonance_score_count(&self, user_id: &str) -> Result<u64>;
-}
-
 /// Combined storage trait for convenience.
 #[async_trait]
-pub trait Storage: TweetStore + SyncStateStore + UserStore + ResonanceStore {}
+pub trait Storage: TweetStore + SyncStateStore + UserStore {}
 
 /// Blanket implementation for types that implement all traits.
-impl<T: TweetStore + SyncStateStore + UserStore + ResonanceStore> Storage for T {}
+impl<T: TweetStore + SyncStateStore + UserStore> Storage for T {}
 
 #[cfg(test)]
 mod tests {

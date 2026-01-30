@@ -25,8 +25,8 @@ pub mod surrealdb;
 pub use memory::MemoryStorage;
 pub use surrealdb::{SurrealDbAuth, SurrealDbConfig, SurrealDbStorage};
 
-// Re-export traits from bird-core for convenience
-pub use bird_core::{ResonanceScore, ResonanceStore, Storage, SyncStateStore, TweetStore};
+// Re-export traits and types from bird-core for convenience
+pub use bird_core::{ResonanceScore, Storage, SyncStateStore, TweetStore};
 
 use std::sync::Arc;
 

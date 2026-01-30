@@ -28,6 +28,5 @@ pub mod cli;
 pub mod commands;
 pub mod insights;
 pub mod output;
-pub mod resonance;
 pub mod storage_monitor;
 pub mod sync_engine;

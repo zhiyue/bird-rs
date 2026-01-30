@@ -234,27 +234,28 @@ pub async fn run(
     }
 
     // Compute resonance scores on-the-fly from interaction data
-    let compute_resonance = |tweet: &TweetData, tweet_colls: Option<&Vec<String>>| -> ResonanceScore {
-        let liked = tweet_colls
-            .map(|colls| colls.iter().any(|c| c == "likes"))
-            .unwrap_or(false);
-        let bookmarked = tweet_colls
-            .map(|colls| colls.iter().any(|c| c == "bookmarks"))
-            .unwrap_or(false);
-        let reply_count = reply_count_map.get(&tweet.id).copied().unwrap_or(0);
-        let quote_count = quote_count_map.get(&tweet.id).copied().unwrap_or(0);
-        let retweet_count = retweet_count_map.get(&tweet.id).copied().unwrap_or(0);
+    let compute_resonance =
+        |tweet: &TweetData, tweet_colls: Option<&Vec<String>>| -> ResonanceScore {
+            let liked = tweet_colls
+                .map(|colls| colls.iter().any(|c| c == "likes"))
+                .unwrap_or(false);
+            let bookmarked = tweet_colls
+                .map(|colls| colls.iter().any(|c| c == "bookmarks"))
+                .unwrap_or(false);
+            let reply_count = reply_count_map.get(&tweet.id).copied().unwrap_or(0);
+            let quote_count = quote_count_map.get(&tweet.id).copied().unwrap_or(0);
+            let retweet_count = retweet_count_map.get(&tweet.id).copied().unwrap_or(0);
 
-        ResonanceScore::new(
-            tweet.id.clone(),
-            user_id.clone(),
-            liked,
-            bookmarked,
-            reply_count,
-            quote_count,
-            retweet_count,
-        )
-    };
+            ResonanceScore::new(
+                tweet.id.clone(),
+                user_id.clone(),
+                liked,
+                bookmarked,
+                reply_count,
+                quote_count,
+                retweet_count,
+            )
+        };
 
     if cli.json() {
         let results: Vec<TweetWithResonance> = tweets
@@ -296,7 +297,13 @@ pub async fn run(
     for tweet in &tweets {
         let tweet_collections = tweet_collections_map.get(&tweet.id).cloned();
         let resonance = compute_resonance(tweet, tweet_collections.as_ref());
-        print_tweet_row(tweet, &resonance, tweet_collections.as_ref(), &cols, show_emoji);
+        print_tweet_row(
+            tweet,
+            &resonance,
+            tweet_collections.as_ref(),
+            &cols,
+            show_emoji,
+        );
     }
 
     // Print pagination info

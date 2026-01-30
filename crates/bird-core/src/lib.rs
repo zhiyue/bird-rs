@@ -15,5 +15,5 @@ pub mod types;
 
 pub use error::{Error, Result};
 pub use pagination::{PaginatedResult, PaginationOptions, SyncState};
-pub use storage::{ResonanceScore, ResonanceStore, Storage, SyncStateStore, TweetStore, UserStore};
+pub use storage::{ResonanceScore, Storage, SyncStateStore, TweetStore, UserStore};
 pub use types::*;

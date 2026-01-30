@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use bird_core::{
-    Error, MentionedUser, ResonanceScore, ResonanceStore, Result, SyncState, SyncStateStore,
+    Error, MentionedUser, Result, SyncState, SyncStateStore,
     TweetData, TweetStore, TweetWithCollections, UserStore,
 };
 use std::collections::{HashMap, HashSet};
@@ -15,7 +15,6 @@ pub struct MemoryStorage {
     sync_states: RwLock<HashMap<(String, String), SyncState>>, // (collection, user_id) -> state
     users: RwLock<HashMap<String, MentionedUser>>,             // user_id -> user
     usernames: RwLock<HashMap<String, String>>,                // username_lower -> user_id
-    resonance_scores: RwLock<HashMap<(String, String), ResonanceScore>>, // (tweet_id, user_id) -> score
 }
 
 impl MemoryStorage {
@@ -27,7 +26,6 @@ impl MemoryStorage {
             sync_states: RwLock::new(HashMap::new()),
             users: RwLock::new(HashMap::new()),
             usernames: RwLock::new(HashMap::new()),
-            resonance_scores: RwLock::new(HashMap::new()),
         }
     }
 }
@@ -588,107 +586,6 @@ impl UserStore for MemoryStorage {
     }
 }
 
-#[async_trait]
-impl ResonanceStore for MemoryStorage {
-    async fn get_resonance_score(
-        &self,
-        tweet_id: &str,
-        user_id: &str,
-    ) -> Result<Option<ResonanceScore>> {
-        let scores = self
-            .resonance_scores
-            .read()
-            .map_err(|e| Error::Storage(e.to_string()))?;
-
-        let key = (tweet_id.to_string(), user_id.to_string());
-        Ok(scores.get(&key).cloned())
-    }
-
-    async fn get_top_resonance_scores(
-        &self,
-        user_id: &str,
-        limit: u32,
-        offset: Option<u32>,
-    ) -> Result<Vec<ResonanceScore>> {
-        let scores = self
-            .resonance_scores
-            .read()
-            .map_err(|e| Error::Storage(e.to_string()))?;
-
-        let offset = offset.unwrap_or(0) as usize;
-        let limit = limit as usize;
-
-        let mut user_scores: Vec<_> = scores
-            .values()
-            .filter(|s| s.user_id == user_id)
-            .cloned()
-            .collect();
-
-        // Sort by total descending
-        user_scores.sort_by(|a, b| {
-            b.total
-                .partial_cmp(&a.total)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        Ok(user_scores.into_iter().skip(offset).take(limit).collect())
-    }
-
-    async fn upsert_resonance_score(&self, score: &ResonanceScore) -> Result<()> {
-        let mut scores = self
-            .resonance_scores
-            .write()
-            .map_err(|e| Error::Storage(e.to_string()))?;
-
-        let key = (score.tweet_id.clone(), score.user_id.clone());
-        scores.insert(key, score.clone());
-        Ok(())
-    }
-
-    async fn upsert_resonance_scores(&self, scores: &[ResonanceScore]) -> Result<usize> {
-        let mut storage = self
-            .resonance_scores
-            .write()
-            .map_err(|e| Error::Storage(e.to_string()))?;
-
-        for score in scores {
-            let key = (score.tweet_id.clone(), score.user_id.clone());
-            storage.insert(key, score.clone());
-        }
-
-        Ok(scores.len())
-    }
-
-    async fn clear_resonance_scores(&self, user_id: &str) -> Result<u64> {
-        let mut scores = self
-            .resonance_scores
-            .write()
-            .map_err(|e| Error::Storage(e.to_string()))?;
-
-        let keys_to_remove: Vec<_> = scores
-            .keys()
-            .filter(|(_, uid)| uid == user_id)
-            .cloned()
-            .collect();
-
-        let count = keys_to_remove.len() as u64;
-        for key in keys_to_remove {
-            scores.remove(&key);
-        }
-
-        Ok(count)
-    }
-
-    async fn resonance_score_count(&self, user_id: &str) -> Result<u64> {
-        let scores = self
-            .resonance_scores
-            .read()
-            .map_err(|e| Error::Storage(e.to_string()))?;
-
-        let count = scores.values().filter(|s| s.user_id == user_id).count() as u64;
-        Ok(count)
-    }
-}
 
 #[cfg(test)]
 mod tests {

@@ -8,7 +8,33 @@ use serde_json::json;
 
 impl TwitterClient {
     /// Fetch user's likes with pagination.
+    /// Uses dynamic query ID discovery with auto-refresh on stale IDs.
     pub(crate) async fn fetch_likes(
+        &self,
+        user_id: &str,
+        options: &PaginationOptions,
+    ) -> Result<PaginatedResult<TweetData>> {
+        // First attempt with current query IDs
+        match self.fetch_likes_with_ids(user_id, options).await {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                // If query ID error, try refreshing and retrying
+                let should_refresh = matches!(&e, Error::ApiError(msg) if msg.contains("Query: Unspecified") || msg.contains("All query IDs failed"));
+
+                if should_refresh {
+                    // Try to refresh query IDs from Twitter's JS bundles
+                    if self.query_id_manager.refresh().await.is_ok() {
+                        // Retry with fresh IDs
+                        return self.fetch_likes_with_ids(user_id, options).await;
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Internal: fetch likes using current query IDs.
+    async fn fetch_likes_with_ids(
         &self,
         user_id: &str,
         options: &PaginationOptions,
@@ -30,12 +56,13 @@ impl TwitterClient {
         let features_json = serde_json::to_string(&features::likes_features()).unwrap();
         let variables_json = serde_json::to_string(&variables).unwrap();
 
-        // Try multiple query IDs in case some are rotated
-        let query_ids = Operation::Likes.fallback_query_ids();
+        // Get query IDs (cached + fallbacks)
+        let query_ids = self.get_query_ids(Operation::Likes.name()).await;
         let headers = self.get_headers();
         let mut last_error = None;
+        let mut had_404 = false;
 
-        for query_id in query_ids {
+        for query_id in &query_ids {
             let url = format!(
                 "{}/{}/{}?variables={}&features={}",
                 TWITTER_API_BASE,
@@ -63,6 +90,7 @@ impl TwitterClient {
             }
 
             if response.status() == 404 {
+                had_404 = true;
                 last_error = Some("HTTP 404".to_string());
                 continue;
             }
@@ -118,8 +146,16 @@ impl TwitterClient {
             return Ok(PaginatedResult::new(tweets, next_cursor));
         }
 
-        Err(Error::ApiError(
-            last_error.unwrap_or_else(|| "All query IDs failed".to_string()),
-        ))
+        // If we had 404s, include that in the error message
+        let error_msg = if had_404 {
+            format!(
+                "All query IDs failed (had 404s): {}",
+                last_error.unwrap_or_default()
+            )
+        } else {
+            last_error.unwrap_or_else(|| "All query IDs failed".to_string())
+        };
+
+        Err(Error::ApiError(error_msg))
     }
 }

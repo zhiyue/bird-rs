@@ -486,6 +486,8 @@ version = "0.1.0"
 dependencies = [
  "bird-core",
  "chrono",
+ "dirs",
+ "futures",
  "getrandom 0.2.17",
  "regex",
  "reqwest",

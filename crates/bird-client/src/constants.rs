@@ -132,19 +132,29 @@ impl Operation {
     }
 
     /// Get fallback query IDs for operations that have multiple known IDs.
+    /// These are updated periodically from dynamic discovery.
     pub fn fallback_query_ids(&self) -> &[&'static str] {
         match self {
             Operation::TweetDetail => &[
+                "Kzfv17rukSzjT96BerOWZA", // Discovered 2026-01-30
                 "_NvJCnIjOW__EP5-RF197A",
                 "97JF30KziU00483E_8elBA",
-                "aFvUsJm2c-oDkJV75blV6g",
             ],
             Operation::SearchTimeline => &[
+                "f_A-Gyo204PRxixpkrchJg", // Discovered 2026-01-30
                 "6AAys3t42mosm_yTI_QENg",
                 "M1jEez78PEfVfbQLvlWMvQ",
-                "5h0kNbk3ii97rmfY6CdgAA",
             ],
-            Operation::Likes => &["ETJflBunfqNa1uE1mBPCaw", "JR2gceKucIKcVNB_9JkhsA"],
+            Operation::Likes => &[
+                "fuBEtiFu3uQFuPDTsv4bfg", // Discovered 2026-01-30
+                "ETJflBunfqNa1uE1mBPCaw",
+                "JR2gceKucIKcVNB_9JkhsA",
+            ],
+            Operation::UserTweets => &["a3SQAz_VP9k8VWDr9bMcXQ"], // Discovered 2026-01-30
+            Operation::Following => &["i2GOldCH2D3OUEhAdimLrA"], // Discovered 2026-01-30
+            Operation::Followers => &["oQWxG6XdR5SPvMBsPiKUPQ"], // Discovered 2026-01-30
+            Operation::HomeTimeline => &["XzjVq_S9RnjdhmUGGPjpuw"], // Discovered 2026-01-30
+            Operation::CreateTweet => &["z0m4Q8u_67R9VOSMXU_MWg"], // Discovered 2026-01-30
             _ => &[],
         }
     }

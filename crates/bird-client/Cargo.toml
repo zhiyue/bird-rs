@@ -21,6 +21,8 @@ regex.workspace = true
 getrandom.workspace = true
 sweet-cookie.workspace = true
 thiserror.workspace = true
+futures.workspace = true
+dirs.workspace = true
 
 [dev-dependencies]
 tokio-test.workspace = true

@@ -36,6 +36,7 @@ mod client;
 pub mod constants;
 pub mod cookies;
 mod operations;
+pub mod query_ids;
 
 pub use bird_core::{
     Collection, CurrentUser, CurrentUserResult, Error, FollowingResult, GetTweetResult, MediaType,

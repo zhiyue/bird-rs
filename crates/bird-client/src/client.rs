@@ -2,6 +2,7 @@
 
 use crate::constants::{features, Operation, BEARER_TOKEN, DEFAULT_USER_AGENT, TWITTER_API_BASE};
 use crate::cookies::TwitterCookies;
+use crate::query_ids::QueryIdManager;
 use crate::TwitterClientOptions;
 use bird_core::{
     CurrentUser, CurrentUserResult, PaginatedResult, PaginationOptions, Result, TweetData,
@@ -9,6 +10,7 @@ use bird_core::{
 use chrono::{DateTime, Utc};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE, COOKIE, USER_AGENT};
 use reqwest::Client;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::sleep;
@@ -104,6 +106,8 @@ pub struct TwitterClient {
     pub(crate) client_uuid: String,
     pub(crate) client_device_id: String,
     pub(crate) client_user_id: Option<String>,
+    /// Query ID manager for dynamic ID discovery.
+    pub(crate) query_id_manager: Arc<QueryIdManager>,
 }
 
 impl TwitterClient {
@@ -113,6 +117,26 @@ impl TwitterClient {
             .timeout(Duration::from_millis(options.timeout_ms.unwrap_or(30000)))
             .build()
             .expect("Failed to create HTTP client");
+
+        // Build fallback query IDs from static constants
+        let mut fallbacks: HashMap<String, Vec<String>> = HashMap::new();
+        for op in [
+            Operation::Likes,
+            Operation::Bookmarks,
+            Operation::BookmarkFolderTimeline,
+            Operation::TweetDetail,
+            Operation::UserTweets,
+            Operation::Following,
+            Operation::Followers,
+            Operation::SearchTimeline,
+            Operation::HomeTimeline,
+            Operation::CreateTweet,
+        ] {
+            let ids: Vec<String> = op.fallback_query_ids().iter().map(|s| s.to_string()).collect();
+            if !ids.is_empty() {
+                fallbacks.insert(op.name().to_string(), ids);
+            }
+        }
 
         Self {
             http_client,
@@ -125,6 +149,7 @@ impl TwitterClient {
             client_uuid: Uuid::new_v4().to_string(),
             client_device_id: Uuid::new_v4().to_string(),
             client_user_id: None,
+            query_id_manager: Arc::new(QueryIdManager::new(fallbacks)),
         }
     }
 
@@ -135,6 +160,19 @@ impl TwitterClient {
             timeout_ms: None,
             quote_depth: None,
         })
+    }
+
+    /// Get query IDs to try for an operation (cached + fallbacks).
+    pub async fn get_query_ids(&self, operation: &str) -> Vec<String> {
+        self.query_id_manager.get_all(operation).await
+    }
+
+    /// Force refresh query IDs from Twitter's JS bundles.
+    pub async fn refresh_query_ids(&self) -> Result<()> {
+        self.query_id_manager
+            .refresh()
+            .await
+            .map_err(|e| bird_core::Error::ApiError(format!("Failed to refresh query IDs: {}", e)))
     }
 
     /// Get the default headers for API requests.

@@ -132,9 +132,9 @@ pub async fn run_backfill(
         user_id.dimmed()
     );
 
-    // Build rate limit config (use default 45s human-like delay unless overridden)
+    // Build rate limit config (default: 2.25s per tweet to simulate human reading)
     let rate_limit = match delay_ms {
-        Some(ms) => RateLimitConfig::with_delay(ms),
+        Some(ms) => RateLimitConfig::with_delay_per_tweet(ms),
         None => RateLimitConfig::default(),
     };
 
@@ -211,9 +211,9 @@ async fn run_sync(
         user_id.dimmed()
     );
 
-    // Build rate limit config (use default 45s human-like delay unless overridden)
+    // Build rate limit config (default: 2.25s per tweet to simulate human reading)
     let rate_limit = match delay_ms {
-        Some(ms) => RateLimitConfig::with_delay(ms),
+        Some(ms) => RateLimitConfig::with_delay_per_tweet(ms),
         None => RateLimitConfig::default(),
     };
 

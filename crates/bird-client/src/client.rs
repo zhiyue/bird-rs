@@ -17,8 +17,9 @@ use uuid::Uuid;
 /// Configuration for rate limiting to avoid getting banned.
 #[derive(Debug, Clone)]
 pub struct RateLimitConfig {
-    /// Delay between page requests in milliseconds (default: 1000ms).
-    pub delay_ms: u64,
+    /// Delay per tweet in milliseconds (simulates human reading speed).
+    /// Total delay = tweets_received * delay_per_tweet_ms
+    pub delay_per_tweet_ms: u64,
     /// Maximum number of retries on rate limit (429) response.
     pub max_retries: u32,
     /// Initial backoff delay in milliseconds for 429 responses (default: 1000ms).
@@ -43,8 +44,8 @@ pub struct RateLimitInfo {
 impl Default for RateLimitConfig {
     fn default() -> Self {
         Self {
-            // ~20 tweets per page, ~2-3 sec per tweet to skim = 40-60 sec per page
-            delay_ms: 45000,           // 45 seconds between pages (human-like)
+            // 2.25 seconds per tweet simulates human reading/skimming speed
+            delay_per_tweet_ms: 2250,
             max_retries: 3,            // Try up to 3 times on 429 (then respect the limit)
             initial_backoff_ms: 60000, // Start with 60s backoff if no reset header
             max_backoff_ms: 900000,    // Cap at 15 minutes (typical Twitter rate limit window)
@@ -54,10 +55,10 @@ impl Default for RateLimitConfig {
 }
 
 impl RateLimitConfig {
-    /// Create a new rate limit config with custom delay.
-    pub fn with_delay(delay_ms: u64) -> Self {
+    /// Create a new rate limit config with custom delay per tweet.
+    pub fn with_delay_per_tweet(delay_per_tweet_ms: u64) -> Self {
         Self {
-            delay_ms,
+            delay_per_tweet_ms,
             ..Default::default()
         }
     }
@@ -65,7 +66,7 @@ impl RateLimitConfig {
     /// No rate limiting (for testing or when you know you won't hit limits).
     pub fn none() -> Self {
         Self {
-            delay_ms: 0,
+            delay_per_tweet_ms: 0,
             max_retries: 0,
             initial_backoff_ms: 0,
             max_backoff_ms: 0,
@@ -618,6 +619,7 @@ impl TwitterClient {
         let mut cursor = options.cursor.clone();
         let mut pages_fetched = 0u32;
         let mut stopped_at_known = false;
+        let mut last_page_tweet_count = 0usize;
 
         loop {
             // Check max pages
@@ -627,13 +629,15 @@ impl TwitterClient {
                 }
             }
 
-            // Rate limit: delay between pages (skip on first page)
-            if pages_fetched > 0 && rate_limit.delay_ms > 0 {
-                sleep(Duration::from_millis(rate_limit.delay_ms)).await;
+            // Rate limit: delay based on tweets from previous page (skip on first page)
+            if pages_fetched > 0 && rate_limit.delay_per_tweet_ms > 0 && last_page_tweet_count > 0 {
+                let delay_ms = last_page_tweet_count as u64 * rate_limit.delay_per_tweet_ms;
+                sleep(Duration::from_millis(delay_ms)).await;
             }
 
             // Fetch with retry on rate limit
             let result = Self::fetch_with_backoff(&fetch_fn, cursor.clone(), rate_limit).await?;
+            last_page_tweet_count = result.items.len();
 
             // Check for stop_at_id
             if let Some(ref stop_id) = options.stop_at_id {

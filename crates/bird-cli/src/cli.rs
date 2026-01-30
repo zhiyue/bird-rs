@@ -264,7 +264,7 @@ enum SyncAction {
         #[arg(long)]
         max_pages: Option<u32>,
 
-        /// Delay between page requests in milliseconds (default: 1000).
+        /// Delay per tweet in ms (simulates reading speed, default: 2250 = 2.25s/tweet).
         #[arg(long)]
         delay: Option<u64>,
 
@@ -287,7 +287,7 @@ enum SyncAction {
         #[arg(long)]
         max_pages: Option<u32>,
 
-        /// Delay between page requests in milliseconds (default: 1000).
+        /// Delay per tweet in ms (simulates reading speed, default: 2250 = 2.25s/tweet).
         #[arg(long)]
         delay: Option<u64>,
 
@@ -310,7 +310,7 @@ enum SyncAction {
         #[arg(long)]
         max_pages: Option<u32>,
 
-        /// Delay between page requests in milliseconds (default: 1000).
+        /// Delay per tweet in ms (simulates reading speed, default: 2250 = 2.25s/tweet).
         #[arg(long)]
         delay: Option<u64>,
 
@@ -332,7 +332,7 @@ enum SyncAction {
         #[arg(long)]
         max_pages: Option<u32>,
 
-        /// Delay between page requests in milliseconds (default: 1000).
+        /// Delay per tweet in ms (simulates reading speed, default: 2250 = 2.25s/tweet).
         #[arg(long)]
         delay: Option<u64>,
 

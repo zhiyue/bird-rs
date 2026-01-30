@@ -33,6 +33,7 @@ bird sync likes
 | `bird whoami`         | Show logged-in account        |
 | `bird likes`          | Fetch your liked tweets       |
 | `bird bookmarks`      | Fetch your bookmarks          |
+| `bird list`           | List all synced tweets (interleaved from likes, bookmarks, posts) |
 | `bird list likes`     | List synced likes from DB     |
 | `bird list bookmarks` | List synced bookmarks from DB |
 | `bird list user_tweets` | List synced posts from DB   |
@@ -41,6 +42,7 @@ bird sync likes
 | `bird sync posts`     | Sync your own tweets to DB    |
 | `bird sync status`    | Show sync progress            |
 | `bird resonance refresh` | Compute resonance scores   |
+| `bird db repair`      | Heal missing data: backfill headlines and recalculate resonance scores |
 | `bird insights generate` | Analyze tweets with LLM    |
 | `bird db status`      | Show database status and counts |
 | `bird db optimize`    | Ensure schema and indexes exist |
@@ -68,6 +70,33 @@ bird sync status
 
 The sync is **forward-only by default**: it catches up on new items, and you can
 explicitly backfill older history over multiple sessions.
+
+## Collections & Interleaved View
+
+By default, `bird list` shows an **interleaved view** of all your collections (likes, bookmarks, posts) in a single list, deduplicated and ordered by earliest discovery time:
+
+```bash
+# Show all collections interleaved (default)
+bird list
+
+# Pagination works across all collections
+bird list --page 2
+
+# Show only a specific collection (backward compatible)
+bird list likes
+bird list bookmarks
+bird list user_tweets
+```
+
+Use the `collections` column to see which collections contain each tweet:
+
+```bash
+# Show collection membership (❤️ for likes, 🔖 for bookmarks, 📝 for posts)
+bird list --columns id,text,collections
+
+# Combine with scores and other data
+bird list --columns id,text,collections,liked,bookmarked,score
+```
 
 ## Insights
 
@@ -98,22 +127,36 @@ The insights command uses Claude Code by default (requires the `claude` CLI).
 Long tweets (>200 chars) automatically get LLM-generated headlines for more
 efficient analysis; these are cached in the database for reuse.
 
-To backfill headlines for existing tweets:
+To heal missing data (backfill headlines and refresh resonance scores):
 
 ```bash
-bird db backfill-headlines --max-tweets 100
+# All-in-one: backfill headlines and recalculate resonance scores
+bird db repair
+
+# Or backfill headlines only with custom options
+bird db backfill-headlines --max-tweets 100 --min-length 200
 ```
 
 ## Resonance Scores
 
-Bird can track which tweets resonated most with you based on your interactions:
+Bird tracks which tweets resonated most with you using a **synergistic resonance formula** that accounts for both passive and active interactions. Interactions compound multiplicatively, rewarding tweets with multiple signals of engagement.
 
-| Interaction | Weight |
-| ----------- | ------ |
-| Bookmark    | 1.0    |
-| Quote       | 0.75   |
-| Like        | 0.5    |
-| Reply       | 0.25   |
+### Formula
+
+The score is calculated as: **base × active_multiplier × synergy_multiplier**
+
+- **Base** (passive interactions): 1.0 + like×0.25 + bookmark×1.0
+- **Active multiplier** (engagement): 1.0 + reply×0.5 + quote×0.75 + retweet×0.8
+- **Synergy multiplier**: 1.5 if both liked AND bookmarked, else 1.0
+
+### Examples
+
+- Just liked: 1.25
+- Just bookmarked: 2.0
+- Liked + bookmarked: 3.375 (2.7× higher due to synergy)
+- Liked + bookmarked + 1 reply: 5.06 (interactions compound)
+
+### Usage
 
 First, compute resonance scores from your synced data:
 
@@ -121,18 +164,46 @@ First, compute resonance scores from your synced data:
 bird resonance refresh
 ```
 
-Then use the `--columns` flag with `bird list` to display scores:
+Then view scores across all collections:
 
 ```bash
-# Show score, liked, and bookmarked columns
-bird list likes --columns id,text,score,liked,bookmarked
+# Show all tweets with scores and interaction counts
+bird list --columns id,text,liked,bookmarked,score
 
-# Available columns: id, text, time, author, liked, bookmarked, score, headline
-bird list bookmarks --columns id,author,score
+# View tweets from a specific collection with scores
+bird list likes --columns id,text,score
+
+# Include collection membership (which collections contain each tweet)
+bird list --columns id,text,collections,score
 ```
 
-Resonance scores are cached locally and run fully offline. Re-run `bird resonance refresh`
-after syncing new data to update scores.
+### Available Columns
+
+- `id` — Tweet ID
+- `text` — Tweet text
+- `time` — Tweet creation time
+- `author` — Author name
+- `liked` — Whether you liked it (Yes/No)
+- `bookmarked` — Whether you bookmarked it (Yes/No)
+- `score` — Resonance score (computed from interactions)
+- `headline` — LLM-generated headline (for tweets >200 chars)
+- `collections` — Which collections contain this tweet (❤️ for likes, 🔖 for bookmarks, 📝 for your posts)
+
+### Keeping Scores Up-to-Date
+
+Scores are cached locally. After syncing new tweets:
+
+```bash
+bird resonance refresh
+```
+
+To backfill missing headlines and recalculate all scores in one command:
+
+```bash
+bird db repair
+```
+
+Resonance scores run fully offline and require no external API calls.
 
 ## Storage
 

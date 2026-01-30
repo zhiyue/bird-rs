@@ -1,8 +1,6 @@
 //! CLI interface for bird.
 
-use crate::commands::{
-    bookmarks, config, db, insights, likes, list, read, sync, whoami,
-};
+use crate::commands::{bookmarks, config, db, insights, likes, list, read, sync, whoami};
 use bird_client::cookies::{check_available_sources, resolve_credentials};
 use bird_client::{Collection, TwitterClient, TwitterClientOptions};
 use bird_storage::{

@@ -68,11 +68,6 @@ impl Column {
             Column::Collections => 12,
         }
     }
-
-    /// Returns true if this column requires resonance score data.
-    fn needs_resonance(&self) -> bool {
-        matches!(self, Column::Liked | Column::Bookmarked | Column::Score)
-    }
 }
 
 /// Parse columns from a list of strings.
@@ -219,31 +214,59 @@ pub async fn run(
         (tweets, tweet_collections, total)
     };
 
-    // Check if we need resonance data
-    let needs_resonance = cols.iter().any(|c| c.needs_resonance());
-    let resonance_map: HashMap<String, ResonanceScore> = if needs_resonance {
-        let tweet_ids: Vec<&str> = tweets.iter().map(|t| t.id.as_str()).collect();
-        let mut map = HashMap::new();
-        for id in tweet_ids {
-            if let Ok(Some(score)) = storage.get_resonance_score(id, &user_id).await {
-                map.insert(id.to_string(), score);
-            }
-        }
-        map
-    } else {
-        HashMap::new()
+    // Fetch interaction counts for computing scores on-the-fly
+    let reply_pairs = storage.get_user_reply_tweets(&user_id, None).await?;
+    let mut reply_count_map: HashMap<String, u32> = HashMap::new();
+    for (tweet_id, _) in reply_pairs {
+        *reply_count_map.entry(tweet_id).or_insert(0) += 1;
+    }
+
+    let quote_pairs = storage.get_user_quote_tweets(&user_id, None).await?;
+    let mut quote_count_map: HashMap<String, u32> = HashMap::new();
+    for (tweet_id, _) in quote_pairs {
+        *quote_count_map.entry(tweet_id).or_insert(0) += 1;
+    }
+
+    let retweet_pairs = storage.get_user_retweets(&user_id, None).await?;
+    let mut retweet_count_map: HashMap<String, u32> = HashMap::new();
+    for (tweet_id, _) in retweet_pairs {
+        *retweet_count_map.entry(tweet_id).or_insert(0) += 1;
+    }
+
+    // Compute resonance scores on-the-fly from interaction data
+    let compute_resonance = |tweet: &TweetData, tweet_colls: Option<&Vec<String>>| -> ResonanceScore {
+        let liked = tweet_colls
+            .map(|colls| colls.iter().any(|c| c == "likes"))
+            .unwrap_or(false);
+        let bookmarked = tweet_colls
+            .map(|colls| colls.iter().any(|c| c == "bookmarks"))
+            .unwrap_or(false);
+        let reply_count = reply_count_map.get(&tweet.id).copied().unwrap_or(0);
+        let quote_count = quote_count_map.get(&tweet.id).copied().unwrap_or(0);
+        let retweet_count = retweet_count_map.get(&tweet.id).copied().unwrap_or(0);
+
+        ResonanceScore::new(
+            tweet.id.clone(),
+            user_id.clone(),
+            liked,
+            bookmarked,
+            reply_count,
+            quote_count,
+            retweet_count,
+        )
     };
 
     if cli.json() {
         let results: Vec<TweetWithResonance> = tweets
             .iter()
             .map(|t| {
-                let resonance = resonance_map.get(&t.id).map(|s| ResonanceJson {
-                    liked: s.liked,
-                    bookmarked: s.bookmarked,
-                    score: s.total,
-                });
                 let collections = tweet_collections_map.get(&t.id).cloned();
+                let score = compute_resonance(t, collections.as_ref());
+                let resonance = Some(ResonanceJson {
+                    liked: score.liked,
+                    bookmarked: score.bookmarked,
+                    score: score.total,
+                });
                 TweetWithResonance {
                     tweet: t.clone(),
                     resonance,
@@ -271,9 +294,9 @@ pub async fn run(
 
     // Print each tweet as a row
     for tweet in &tweets {
-        let resonance = resonance_map.get(&tweet.id);
-        let tweet_collections = tweet_collections_map.get(&tweet.id);
-        print_tweet_row(tweet, resonance, tweet_collections, &cols, show_emoji);
+        let tweet_collections = tweet_collections_map.get(&tweet.id).cloned();
+        let resonance = compute_resonance(tweet, tweet_collections.as_ref());
+        print_tweet_row(tweet, &resonance, tweet_collections.as_ref(), &cols, show_emoji);
     }
 
     // Print pagination info
@@ -317,7 +340,7 @@ fn print_table_header(cols: &[Column], show_emoji: bool) {
 /// Print a single tweet as a table row.
 fn print_tweet_row(
     tweet: &TweetData,
-    resonance: Option<&ResonanceScore>,
+    resonance: &ResonanceScore,
     collections: Option<&Vec<String>>,
     cols: &[Column],
     show_emoji: bool,
@@ -344,7 +367,7 @@ fn truncate_str(s: &str, max_chars: usize) -> String {
 /// Format a single column value.
 fn format_column(
     tweet: &TweetData,
-    resonance: Option<&ResonanceScore>,
+    resonance: &ResonanceScore,
     collections: Option<&Vec<String>>,
     col: &Column,
     show_emoji: bool,
@@ -374,8 +397,7 @@ fn format_column(
         }
 
         Column::Liked => {
-            let liked = resonance.map(|r| r.liked).unwrap_or(false);
-            let display = if liked {
+            let display = if resonance.liked {
                 if show_emoji {
                     "❤️".to_string()
                 } else {
@@ -388,8 +410,7 @@ fn format_column(
         }
 
         Column::Bookmarked => {
-            let bookmarked = resonance.map(|r| r.bookmarked).unwrap_or(false);
-            let display = if bookmarked {
+            let display = if resonance.bookmarked {
                 if show_emoji {
                     "🔖".to_string()
                 } else {
@@ -402,9 +423,8 @@ fn format_column(
         }
 
         Column::Score => {
-            let score = resonance.map(|r| r.total).unwrap_or(0.0);
-            let display = if score > 0.0 {
-                format!("{:.2}", score).green().to_string()
+            let display = if resonance.total > 0.0 {
+                format!("{:.2}", resonance.total).green().to_string()
             } else {
                 "-".to_string()
             };

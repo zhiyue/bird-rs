@@ -2,8 +2,8 @@
 
 use async_trait::async_trait;
 use bird_core::{
-    Error, MentionedUser, Result, SyncState, SyncStateStore,
-    TweetData, TweetStore, TweetWithCollections, UserStore,
+    Error, MentionedUser, Result, SyncState, SyncStateStore, TweetData, TweetStore,
+    TweetWithCollections, UserStore,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
@@ -585,7 +585,6 @@ impl UserStore for MemoryStorage {
         Ok(results)
     }
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -2,8 +2,8 @@
 
 use async_trait::async_trait;
 use bird_core::{
-    Error, MentionedUser, Result, SyncState, SyncStateStore,
-    TweetAuthor, TweetData, TweetStore, TweetWithCollections, UserStore,
+    Error, MentionedUser, Result, SyncState, SyncStateStore, TweetAuthor, TweetData, TweetStore,
+    TweetWithCollections, UserStore,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

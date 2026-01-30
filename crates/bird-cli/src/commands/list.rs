@@ -22,6 +22,7 @@ pub enum Column {
     Bookmarked,
     Score,
     Headline,
+    Collections,
 }
 
 impl Column {
@@ -35,6 +36,7 @@ impl Column {
             "bookmarked" => Some(Column::Bookmarked),
             "score" => Some(Column::Score),
             "headline" => Some(Column::Headline),
+            "collections" => Some(Column::Collections),
             _ => None,
         }
     }
@@ -49,6 +51,7 @@ impl Column {
             Column::Bookmarked => "Bookmarked",
             Column::Score => "Score",
             Column::Headline => "Headline",
+            Column::Collections => "Collections",
         }
     }
 
@@ -62,6 +65,7 @@ impl Column {
             Column::Bookmarked => 10,
             Column::Score => 6,
             Column::Headline => 30,
+            Column::Collections => 12,
         }
     }
 
@@ -108,6 +112,8 @@ struct TweetWithResonance {
     tweet: TweetData,
     #[serde(skip_serializing_if = "Option::is_none")]
     resonance: Option<ResonanceJson>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    collections: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -172,6 +178,25 @@ pub async fn run(
         HashMap::new()
     };
 
+    // Check if we need collections data
+    let needs_collections = cols.iter().any(|c| matches!(c, Column::Collections));
+    let collections_map: HashMap<String, Vec<String>> = if needs_collections {
+        let mut map = HashMap::new();
+        for tweet in &tweets {
+            let mut tweet_collections = Vec::new();
+            // Check all known collections for this tweet
+            for coll in &["likes", "bookmarks", "user_tweets"] {
+                if storage.is_in_collection(&tweet.id, coll, &user_id).await? {
+                    tweet_collections.push(coll.to_string());
+                }
+            }
+            map.insert(tweet.id.clone(), tweet_collections);
+        }
+        map
+    } else {
+        HashMap::new()
+    };
+
     if cli.json() {
         let results: Vec<TweetWithResonance> = tweets
             .iter()
@@ -181,9 +206,11 @@ pub async fn run(
                     bookmarked: s.bookmarked,
                     score: s.total,
                 });
+                let collections = collections_map.get(&t.id).cloned();
                 TweetWithResonance {
                     tweet: t.clone(),
                     resonance,
+                    collections,
                 }
             })
             .collect();
@@ -206,7 +233,8 @@ pub async fn run(
     // Print each tweet as a row
     for tweet in &tweets {
         let resonance = resonance_map.get(&tweet.id);
-        print_tweet_row(tweet, resonance, &cols, show_emoji);
+        let tweet_collections = collections_map.get(&tweet.id);
+        print_tweet_row(tweet, resonance, tweet_collections, &cols, show_emoji);
     }
 
     // Print pagination info
@@ -251,12 +279,13 @@ fn print_table_header(cols: &[Column], show_emoji: bool) {
 fn print_tweet_row(
     tweet: &TweetData,
     resonance: Option<&ResonanceScore>,
+    collections: Option<&Vec<String>>,
     cols: &[Column],
     show_emoji: bool,
 ) {
     let values: Vec<String> = cols
         .iter()
-        .map(|c| format_column(tweet, resonance, c, show_emoji))
+        .map(|c| format_column(tweet, resonance, collections, c, show_emoji))
         .collect();
 
     println!("{}", values.join(" "));
@@ -277,6 +306,7 @@ fn truncate_str(s: &str, max_chars: usize) -> String {
 fn format_column(
     tweet: &TweetData,
     resonance: Option<&ResonanceScore>,
+    collections: Option<&Vec<String>>,
     col: &Column,
     show_emoji: bool,
 ) -> String {
@@ -353,6 +383,39 @@ fn format_column(
                 })
                 .unwrap_or_else(|| "-".to_string());
             format!("{:<width$}", headline.yellow(), width = width)
+        }
+
+        Column::Collections => {
+            let collections_str = collections
+                .map(|colls| {
+                    if show_emoji {
+                        // Use emoji badges for each collection
+                        let badges: Vec<&str> = colls
+                            .iter()
+                            .map(|c| match c.as_str() {
+                                "likes" => "❤️",
+                                "bookmarks" => "🔖",
+                                "user_tweets" => "📝",
+                                _ => "•",
+                            })
+                            .collect();
+                        badges.join("")
+                    } else {
+                        // Use single-letter abbreviations
+                        let abbrevs: Vec<&str> = colls
+                            .iter()
+                            .map(|c| match c.as_str() {
+                                "likes" => "L",
+                                "bookmarks" => "B",
+                                "user_tweets" => "U",
+                                _ => "?",
+                            })
+                            .collect();
+                        abbrevs.join(",")
+                    }
+                })
+                .unwrap_or_else(|| "-".to_string());
+            format!("{:<width$}", collections_str, width = width)
         }
     }
 }

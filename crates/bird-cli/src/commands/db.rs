@@ -542,23 +542,7 @@ pub async fn run_repair(
     println!("{}Repairing database...", icon);
     println!();
 
-    // Step 1: Backfill headlines
-    println!("{}Step 1: Backfilling missing headlines...", icon);
-    run_backfill_headlines(
-        cli,
-        min_length,
-        batch_size,
-        None,
-        provider,
-        model,
-        show_emoji,
-    )
-    .await?;
-
-    println!();
-
-    // Step 2: Recalculate resonance scores
-    println!("{}Step 2: Recalculating resonance scores...", icon);
+    // Create storage connection once and reuse for both steps
     let storage = cli.create_storage().await?;
 
     // Get user ID from local sync state
@@ -569,7 +553,76 @@ pub async fn run_repair(
             "No synced data found. Run 'bird sync likes' or 'bird sync bookmarks' first."
         ))?;
 
-    // Get stats and refresh scores
+    // Step 1: Backfill headlines
+    println!("{}Step 1: Backfilling missing headlines...", icon);
+    let icon_paper = if show_emoji { "📝 " } else { "" };
+    println!(
+        "{}Backfilling headlines for tweets with text > {} chars",
+        icon_paper, min_length
+    );
+
+    // Create LLM provider
+    let llm: Box<dyn LlmProvider> = match provider.as_str() {
+        "claude-code" => Box::new(ClaudeCodeProvider::new(model)),
+        _ => anyhow::bail!("Unsupported provider: {}. Use 'claude-code'.", provider),
+    };
+
+    println!("  Using {} ({})", llm.name(), llm.model());
+    println!();
+
+    let mut total_generated = 0;
+    let mut total_processed = 0;
+
+    loop {
+        // Get tweets missing headlines
+        let tweets = storage
+            .get_tweets_missing_headlines(min_length, Some(batch_size))
+            .await?;
+
+        if tweets.is_empty() {
+            break;
+        }
+
+        println!(
+            "  Processing batch of {} tweets (total: {})...",
+            tweets.len(),
+            total_processed
+        );
+
+        // Generate headlines
+        let tweet_refs: Vec<_> = tweets.iter().collect();
+        match generate_headlines(&tweet_refs, llm.as_ref()).await {
+            Ok(headlines) => {
+                if !headlines.is_empty() {
+                    // Store headlines
+                    let headline_pairs: Vec<(String, String)> = headlines.into_iter().collect();
+                    let updated = storage.update_tweet_headlines(&headline_pairs).await?;
+                    total_generated += updated;
+                    println!("    {} Generated {} headlines", "✓".green(), updated.to_string().bold());
+                }
+            }
+            Err(e) => {
+                eprintln!("    {} Failed to generate headlines: {}", "✗".red(), e);
+            }
+        }
+
+        total_processed += tweets.len() as u32;
+    }
+
+    println!();
+    println!(
+        "{}Backfill complete: {} headlines generated for {} tweets",
+        icon_paper,
+        total_generated.to_string().green().bold(),
+        total_processed.to_string().cyan()
+    );
+
+    println!();
+
+    // Step 2: Recalculate resonance scores
+    println!("{}Step 2: Recalculating resonance scores...", icon);
+
+    // Get stats and refresh scores using the same connection
     let stats = get_interaction_stats(&storage, &user_id).await?;
     let result = refresh_resonance_scores(&storage, &user_id, Some(5000)).await?;
 
@@ -596,7 +649,10 @@ pub async fn run_repair(
 
     println!();
     println!("{}Repair complete! ✨", icon.bold().green());
-    println!("Use {} to see results.", "bird list --columns id,headline,collections,score".cyan());
+    println!(
+        "Use {} to see results.",
+        "bird list --columns id,headline,collections,score".cyan()
+    );
 
     Ok(())
 }

@@ -151,8 +151,8 @@ impl Operation {
                 "JR2gceKucIKcVNB_9JkhsA",
             ],
             Operation::UserTweets => &["a3SQAz_VP9k8VWDr9bMcXQ"], // Discovered 2026-01-30
-            Operation::Following => &["i2GOldCH2D3OUEhAdimLrA"], // Discovered 2026-01-30
-            Operation::Followers => &["oQWxG6XdR5SPvMBsPiKUPQ"], // Discovered 2026-01-30
+            Operation::Following => &["i2GOldCH2D3OUEhAdimLrA"],  // Discovered 2026-01-30
+            Operation::Followers => &["oQWxG6XdR5SPvMBsPiKUPQ"],  // Discovered 2026-01-30
             Operation::HomeTimeline => &["XzjVq_S9RnjdhmUGGPjpuw"], // Discovered 2026-01-30
             Operation::CreateTweet => &["z0m4Q8u_67R9VOSMXU_MWg"], // Discovered 2026-01-30
             _ => &[],

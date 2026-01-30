@@ -132,7 +132,11 @@ impl TwitterClient {
             Operation::HomeTimeline,
             Operation::CreateTweet,
         ] {
-            let ids: Vec<String> = op.fallback_query_ids().iter().map(|s| s.to_string()).collect();
+            let ids: Vec<String> = op
+                .fallback_query_ids()
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
             if !ids.is_empty() {
                 fallbacks.insert(op.name().to_string(), ids);
             }

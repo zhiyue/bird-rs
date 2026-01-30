@@ -391,6 +391,25 @@ enum DbAction {
 
     /// Ensure database schema and indexes exist.
     Optimize,
+
+    /// Repair missing data (headlines, resonance scores).
+    Repair {
+        /// Minimum text length (chars) to require headline (default: 200).
+        #[arg(long, default_value = "200")]
+        min_length: usize,
+
+        /// Batch size for LLM calls (default: 20).
+        #[arg(long, default_value = "20")]
+        batch_size: u32,
+
+        /// LLM provider to use (default: claude-code).
+        #[arg(long, default_value = "claude-code")]
+        provider: String,
+
+        /// LLM model to use.
+        #[arg(long)]
+        model: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -589,6 +608,22 @@ impl Cli {
                 }
                 DbAction::Status { debug } => db::run_status(&self, show_emoji, *debug).await,
                 DbAction::Optimize => db::run_optimize(&self, show_emoji).await,
+                DbAction::Repair {
+                    min_length,
+                    batch_size,
+                    provider,
+                    model,
+                } => {
+                    db::run_repair(
+                        &self,
+                        *min_length,
+                        *batch_size,
+                        provider.clone(),
+                        model.clone(),
+                        show_emoji,
+                    )
+                    .await
+                }
             },
             Some(Commands::Config { action }) => match action {
                 ConfigAction::Init { force } => config::run_init(&self, *force, show_emoji).await,

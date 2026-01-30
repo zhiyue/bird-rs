@@ -5,6 +5,7 @@ use crate::insights::headlines::generate_headlines;
 use crate::insights::llm::claude_code::ClaudeCodeProvider;
 use crate::insights::llm::LlmProvider;
 use crate::output::format_json;
+use crate::resonance::{get_interaction_stats, refresh_resonance_scores};
 use bird_storage::{StorageConfig, SurrealDbStorage, TweetStore};
 use chrono::{TimeZone, Utc};
 use colored::Colorize;
@@ -523,6 +524,79 @@ pub async fn run_backfill_headlines(
         total_generated.to_string().green().bold(),
         total_processed.to_string().cyan()
     );
+
+    Ok(())
+}
+
+/// Repair missing data: backfill headlines and recalculate resonance scores.
+pub async fn run_repair(
+    cli: &Cli,
+    min_length: usize,
+    batch_size: u32,
+    provider: String,
+    model: Option<String>,
+    show_emoji: bool,
+) -> anyhow::Result<()> {
+    let icon = if show_emoji { "🔧 " } else { "" };
+
+    println!("{}Repairing database...", icon);
+    println!();
+
+    // Step 1: Backfill headlines
+    println!("{}Step 1: Backfilling missing headlines...", icon);
+    run_backfill_headlines(
+        cli,
+        min_length,
+        batch_size,
+        None,
+        provider,
+        model,
+        show_emoji,
+    )
+    .await?;
+
+    println!();
+
+    // Step 2: Recalculate resonance scores
+    println!("{}Step 2: Recalculating resonance scores...", icon);
+    let storage = cli.create_storage().await?;
+
+    // Get user ID from local sync state
+    let user_id = storage
+        .get_any_synced_user_id()
+        .await?
+        .ok_or_else(|| anyhow::anyhow!(
+            "No synced data found. Run 'bird sync likes' or 'bird sync bookmarks' first."
+        ))?;
+
+    // Get stats and refresh scores
+    let stats = get_interaction_stats(&storage, &user_id).await?;
+    let result = refresh_resonance_scores(&storage, &user_id, Some(5000)).await?;
+
+    let check_icon = if show_emoji { "✅ " } else { "" };
+    println!("{}Resonance scores refreshed!", check_icon);
+    println!();
+    println!("  Interactions analyzed:");
+    let like_icon = if show_emoji { "❤️  " } else { "  " };
+    let bookmark_icon = if show_emoji { "🔖 " } else { "  " };
+    let reply_icon = if show_emoji { "💬 " } else { "  " };
+    let quote_icon = if show_emoji { "💬 " } else { "  " };
+    let retweet_icon = if show_emoji { "🔁 " } else { "  " };
+    println!("    {}Likes: {}", like_icon, stats.likes);
+    println!("    {}Bookmarks: {}", bookmark_icon, stats.bookmarks);
+    println!("    {}Replies: {}", reply_icon, stats.replies);
+    println!("    {}Quotes: {}", quote_icon, stats.quotes);
+    println!("    {}Retweets: {}", retweet_icon, stats.retweets);
+    println!();
+    println!(
+        "  Unique tweets with interactions: {}",
+        result.unique_tweets.to_string().green()
+    );
+    println!("  Scores computed: {}", result.computed.to_string().green());
+
+    println!();
+    println!("{}Repair complete! ✨", icon.bold().green());
+    println!("Use {} to see results.", "bird list --columns id,headline,collections,score".cyan());
 
     Ok(())
 }

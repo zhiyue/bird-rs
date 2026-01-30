@@ -126,7 +126,7 @@ struct ResonanceJson {
 /// Run the list command.
 pub async fn run(
     cli: &Cli,
-    collection: &str,
+    collection: Option<&str>,
     page: u32,
     page_size: Option<u32>,
     show_headline: bool,
@@ -155,13 +155,60 @@ pub async fn run(
     let size = page_size.unwrap_or(DEFAULT_PAGE_SIZE);
     let offset = (page.saturating_sub(1)) * size;
 
-    // Get total count
-    let total = storage.collection_count(collection, &user_id).await?;
+    // Determine if using interleaved view (all collections) or single collection
+    let is_interleaved = collection.is_none();
 
-    // Get tweets for this page
-    let tweets = storage
-        .get_tweets_by_collection(collection, &user_id, Some(size), Some(offset))
-        .await?;
+    // Get tweets and collection info based on mode
+    let (tweets, tweet_collections_map, total) = if is_interleaved {
+        // Interleaved view: fetch from all collections
+        let interleaved_tweets = storage
+            .get_tweets_interleaved(&["likes", "bookmarks", "user_tweets"], &user_id, Some(size), Some(offset))
+            .await?;
+
+        // For interleaved, we need a different total count
+        // Count unique tweets across all collections
+        let likes_count = storage.collection_count("likes", &user_id).await? as usize;
+        let bookmarks_count = storage.collection_count("bookmarks", &user_id).await? as usize;
+        let user_tweets_count = storage.collection_count("user_tweets", &user_id).await? as usize;
+        let total_estimate = (likes_count + bookmarks_count + user_tweets_count).max(interleaved_tweets.len()) as u64;
+
+        let tweet_collections: HashMap<String, Vec<String>> = interleaved_tweets
+            .iter()
+            .map(|twc| (twc.tweet.id.clone(), twc.collections.clone()))
+            .collect();
+
+        let tweets: Vec<TweetData> = interleaved_tweets.into_iter().map(|twc| twc.tweet).collect();
+
+        (tweets, tweet_collections, total_estimate)
+    } else {
+        // Single collection view
+        let coll = collection.unwrap();
+        let total = storage.collection_count(coll, &user_id).await?;
+        let tweets = storage
+            .get_tweets_by_collection(coll, &user_id, Some(size), Some(offset))
+            .await?;
+
+        // For single collection, we still need to get the collections info if columns require it
+        let needs_collections = cols.iter().any(|c| matches!(c, Column::Collections));
+        let tweet_collections: HashMap<String, Vec<String>> = if needs_collections {
+            let mut map = HashMap::new();
+            for tweet in &tweets {
+                let mut tweet_colls = Vec::new();
+                // Check all known collections for this tweet
+                for c in &["likes", "bookmarks", "user_tweets"] {
+                    if storage.is_in_collection(&tweet.id, c, &user_id).await? {
+                        tweet_colls.push(c.to_string());
+                    }
+                }
+                map.insert(tweet.id.clone(), tweet_colls);
+            }
+            map
+        } else {
+            HashMap::new()
+        };
+
+        (tweets, tweet_collections, total)
+    };
 
     // Check if we need resonance data
     let needs_resonance = cols.iter().any(|c| c.needs_resonance());
@@ -178,25 +225,6 @@ pub async fn run(
         HashMap::new()
     };
 
-    // Check if we need collections data
-    let needs_collections = cols.iter().any(|c| matches!(c, Column::Collections));
-    let collections_map: HashMap<String, Vec<String>> = if needs_collections {
-        let mut map = HashMap::new();
-        for tweet in &tweets {
-            let mut tweet_collections = Vec::new();
-            // Check all known collections for this tweet
-            for coll in &["likes", "bookmarks", "user_tweets"] {
-                if storage.is_in_collection(&tweet.id, coll, &user_id).await? {
-                    tweet_collections.push(coll.to_string());
-                }
-            }
-            map.insert(tweet.id.clone(), tweet_collections);
-        }
-        map
-    } else {
-        HashMap::new()
-    };
-
     if cli.json() {
         let results: Vec<TweetWithResonance> = tweets
             .iter()
@@ -206,7 +234,7 @@ pub async fn run(
                     bookmarked: s.bookmarked,
                     score: s.total,
                 });
-                let collections = collections_map.get(&t.id).cloned();
+                let collections = tweet_collections_map.get(&t.id).cloned();
                 TweetWithResonance {
                     tweet: t.clone(),
                     resonance,
@@ -221,8 +249,10 @@ pub async fn run(
     if tweets.is_empty() {
         if page > 1 {
             println!("No tweets on page {}.", page);
+        } else if let Some(coll) = collection {
+            println!("No {} found in database.", coll);
         } else {
-            println!("No {} found in database.", collection);
+            println!("No tweets found in database.");
         }
         return Ok(());
     }
@@ -233,7 +263,7 @@ pub async fn run(
     // Print each tweet as a row
     for tweet in &tweets {
         let resonance = resonance_map.get(&tweet.id);
-        let tweet_collections = collections_map.get(&tweet.id);
+        let tweet_collections = tweet_collections_map.get(&tweet.id);
         print_tweet_row(tweet, resonance, tweet_collections, &cols, show_emoji);
     }
 

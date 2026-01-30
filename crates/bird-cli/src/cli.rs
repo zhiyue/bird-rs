@@ -198,9 +198,8 @@ enum Commands {
 
     /// List tweets from the local database.
     List {
-        /// Collection to list (likes, bookmarks, user_tweets).
-        #[arg(default_value = "likes")]
-        collection: String,
+        /// Collection to list (likes, bookmarks, user_tweets). If omitted, shows all collections (interleaved).
+        collection: Option<String>,
 
         /// Page number (1-indexed).
         #[arg(long, default_value = "1")]
@@ -215,7 +214,7 @@ enum Commands {
         show_headline: bool,
 
         /// Columns to display (comma-separated).
-        /// Available: id, text, time, author, liked, bookmarked, score, headline.
+        /// Available: id, text, time, author, liked, bookmarked, score, headline, collections.
         /// Default: id,text,time
         #[arg(long, value_delimiter = ',')]
         columns: Option<Vec<String>>,
@@ -481,7 +480,7 @@ impl Cli {
             }) => {
                 list::run(
                     &self,
-                    collection,
+                    collection.as_deref(),
                     *page,
                     *page_size,
                     *show_headline,

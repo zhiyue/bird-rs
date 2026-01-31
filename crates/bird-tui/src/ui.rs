@@ -57,7 +57,7 @@ pub fn render(f: &mut Frame, app: &App) {
     render_status_bar(f, app, main_chunks[1]);
 }
 
-/// Render the left panel with tweet list.
+/// Render the left panel with tweet list (multi-column).
 fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = app
         .tweets
@@ -65,14 +65,16 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
         .enumerate()
         .map(|(i, tweet)| {
             let emoji = collection_emoji(&tweet.collections);
-            let id_display = truncate_id(&tweet.id, 10);
-            let headline = truncate_text(&tweet.headline, 30);
+            let id_display = truncate_id(&tweet.id, 8);
+            let author_display = truncate_text(&tweet.author_username, 10);
+            let score_display = format!("{:.1}", tweet.resonance_score.total);
+            let headline = truncate_text(&tweet.headline, 35);
 
-            let content = if emoji.is_empty() {
-                format!("{} {}", id_display, headline)
-            } else {
-                format!("{} {} {}", id_display, headline, emoji)
-            };
+            // Multi-column layout: ID | Author | Score | Headline | Collections
+            let content = format!(
+                "{:8} | {:10} | {:5} | {:35} {}",
+                id_display, author_display, score_display, headline, emoji
+            );
 
             let style = if i == app.selected_index {
                 Style::default()

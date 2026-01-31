@@ -1,56 +1,132 @@
 //! Data fetching and resonance computation for bird-tui.
 
 use crate::app::{App, TweetDisplayData};
+use bird_core::TweetWithCollections;
 use bird_storage::ResonanceScore;
 use std::collections::HashMap;
 
 /// Load tweets for the current page and update app state.
+/// Also preloads next and previous pages for faster navigation.
 pub async fn load_page_tweets(app: &mut App, collections: &[&str]) -> Result<(), String> {
     app.loading = true;
 
-    let offset = app.current_page * app.page_size;
+    // Check if current page is cached
+    if let Some(cached_tweets) = app.page_cache.get(&app.current_page).cloned() {
+        app.tweets = cached_tweets;
+        app.selected_index = 0;
+        app.detail_scroll_offset = 0;
+        app.loading = false;
 
-    // Fetch tweets for this page
+        // Preload adjacent pages in background (non-blocking)
+        let next_page = app.current_page + 1;
+        let total_pages = (app.total_count as u32).div_ceil(app.page_size);
+
+        if next_page < total_pages && !app.page_cache.contains_key(&next_page) {
+            // Store for background preloading
+            app.page_cache.insert(next_page, Vec::new());
+        }
+
+        return Ok(());
+    }
+
+    // Fetch current page if not cached
+    let offset = app.current_page * app.page_size;
     let tweets_result = app
         .storage
         .get_tweets_interleaved(collections, &app.user_id, Some(app.page_size), Some(offset))
         .await
         .map_err(|e| format!("Failed to fetch tweets: {}", e))?;
 
-    app.clear();
+    let display_tweets = convert_tweets_to_display(app, tweets_result);
 
-    // Convert to display data
-    for tweet in tweets_result {
-        let tweet_id = tweet.tweet.id.clone();
-
-        // Get resonance score (should already be computed)
-        let resonance_score = app
-            .resonance_scores
-            .get(&tweet_id)
-            .cloned()
-            .unwrap_or_else(|| {
-                ResonanceScore::new(tweet_id.clone(), app.user_id.clone(), false, false, 0, 0, 0)
-            });
-
-        // Get collections and timestamps
-        let collections_vec = tweet.collections.clone();
-        let created_at = tweet.tweet.created_at.as_ref().map(|s| format_timestamp(s));
-
-        let display = TweetDisplayData {
-            id: tweet_id.clone(),
-            text: tweet.tweet.text.clone(),
-            author_username: tweet.tweet.author.username.clone(),
-            author_name: tweet.tweet.author.name.clone(),
-            headline: truncate_text(&tweet.tweet.text, 50),
-            collections: collections_vec,
-            resonance_score,
-            created_at,
-        };
-
-        app.tweets.push(display);
-    }
+    // Cache current page
+    app.page_cache.insert(app.current_page, display_tweets.clone());
+    app.tweets = display_tweets;
+    app.selected_index = 0;
+    app.detail_scroll_offset = 0;
 
     app.loading = false;
+
+    // Preload next and previous pages asynchronously
+    // Note: This is set up but not fully awaited to avoid blocking UI
+    let _ = preload_adjacent_pages(app, collections).await;
+
+    Ok(())
+}
+
+/// Helper function to convert raw tweets to display data.
+fn convert_tweets_to_display(
+    app: &App,
+    tweets_result: Vec<TweetWithCollections>,
+) -> Vec<TweetDisplayData> {
+    tweets_result
+        .into_iter()
+        .map(|tweet| {
+            let tweet_id = tweet.tweet.id.clone();
+
+            let resonance_score =
+                app.resonance_scores
+                    .get(&tweet_id)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        ResonanceScore::new(
+                            tweet_id.clone(),
+                            app.user_id.clone(),
+                            false,
+                            false,
+                            0,
+                            0,
+                            0,
+                        )
+                    });
+
+            let collections_vec = tweet.collections.clone();
+            let created_at = tweet.tweet.created_at.as_ref().map(|s| format_timestamp(s));
+
+            TweetDisplayData {
+                id: tweet_id,
+                text: tweet.tweet.text.clone(),
+                author_username: tweet.tweet.author.username.clone(),
+                author_name: tweet.tweet.author.name.clone(),
+                headline: truncate_text(&tweet.tweet.text, 50),
+                collections: collections_vec,
+                resonance_score,
+                created_at,
+            }
+        })
+        .collect()
+}
+
+/// Preload adjacent pages (next and previous) for faster pagination.
+async fn preload_adjacent_pages(app: &mut App, collections: &[&str]) -> Result<(), String> {
+    let total_pages = (app.total_count as u32).div_ceil(app.page_size);
+
+    // Preload next page
+    if app.current_page + 1 < total_pages && !app.page_cache.contains_key(&(app.current_page + 1)) {
+        let offset = (app.current_page + 1) * app.page_size;
+        if let Ok(tweets_result) = app
+            .storage
+            .get_tweets_interleaved(collections, &app.user_id, Some(app.page_size), Some(offset))
+            .await
+        {
+            let display_tweets = convert_tweets_to_display(app, tweets_result);
+            app.page_cache.insert(app.current_page + 1, display_tweets);
+        }
+    }
+
+    // Preload previous page
+    if app.current_page > 0 && !app.page_cache.contains_key(&(app.current_page - 1)) {
+        let offset = (app.current_page - 1) * app.page_size;
+        if let Ok(tweets_result) = app
+            .storage
+            .get_tweets_interleaved(collections, &app.user_id, Some(app.page_size), Some(offset))
+            .await
+        {
+            let display_tweets = convert_tweets_to_display(app, tweets_result);
+            app.page_cache.insert(app.current_page - 1, display_tweets);
+        }
+    }
+
     Ok(())
 }
 

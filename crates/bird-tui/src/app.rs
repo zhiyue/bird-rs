@@ -36,6 +36,10 @@ pub struct App {
     /// All tweets currently loaded (for current page).
     pub tweets: Vec<TweetDisplayData>,
 
+    /// Cache of preloaded pages for faster pagination.
+    /// Key is page number, value is list of tweets for that page.
+    pub page_cache: HashMap<u32, Vec<TweetDisplayData>>,
+
     /// Collection membership info for all tweets in database.
     pub tweet_collections: HashMap<String, Vec<CollectionMembership>>,
 
@@ -81,6 +85,7 @@ impl App {
     pub fn new(storage: Arc<dyn Storage>, user_id: String) -> Self {
         Self {
             tweets: Vec::new(),
+            page_cache: HashMap::new(),
             tweet_collections: HashMap::new(),
             resonance_scores: HashMap::new(),
             selected_index: 0,

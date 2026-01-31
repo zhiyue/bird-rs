@@ -1,0 +1,35 @@
+[package]
+name = "bird-tui"
+description = "A terminal user interface for viewing synced tweets"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["twitter", "x", "tui", "terminal", "social-media"]
+categories = ["command-line-utilities", "web-programming"]
+
+[[bin]]
+name = "bird-tui"
+path = "src/main.rs"
+
+[dependencies]
+bird-core.workspace = true
+bird-storage.workspace = true
+clap.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+dirs.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+
+# TUI
+ratatui = "0.28"
+crossterm = "0.28"
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio-test.workspace = true

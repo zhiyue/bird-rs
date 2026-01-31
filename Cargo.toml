@@ -5,6 +5,7 @@ members = [
     "crates/bird-client",
     "crates/bird-storage",
     "crates/bird-cli",
+    "crates/bird-tui",
 ]
 
 [workspace.package]

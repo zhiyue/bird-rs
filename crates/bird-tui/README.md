@@ -34,19 +34,34 @@ cargo build --release -p bird-tui
 
 ## Usage
 
+### Authentication
+
+bird-tui needs your Twitter authentication credentials to fetch your current user ID from the API. Provide either:
+
+```bash
+# Extract from browser automatically (recommended)
+./target/release/bird-tui
+
+# Or provide credentials explicitly
+./target/release/bird-tui --auth-token YOUR_AUTH_TOKEN --ct0 YOUR_CT0
+```
+
 ### Basic Usage
 
 ```bash
-# Start the TUI (connects to default database)
+# Start the TUI (connects to default database, fetches your user ID)
 ./target/release/bird-tui
 
 # Or with custom database
 ./target/release/bird-tui --db-path ~/.bird/custom.db
+
+# Override extracted credentials with explicit ones
+./target/release/bird-tui --auth-token TOKEN --ct0 TOKEN
 ```
 
 ### Configuration
 
-bird-tui supports the same configuration options as bird-cli:
+bird-tui supports the same storage configuration options as bird-cli, plus Twitter authentication:
 
 ```bash
 # Use memory storage
@@ -55,12 +70,22 @@ bird-tui supports the same configuration options as bird-cli:
 # Connect to remote SurrealDB
 ./target/release/bird-tui --db-url ws://localhost:8000
 
-# With authentication
+# With SurrealDB authentication
 ./target/release/bird-tui --db-url ws://localhost:8000 \
   --db-auth namespace \
   --db-user user123 \
   --db-pass pass123
+
+# With explicit Twitter credentials
+./target/release/bird-tui --auth-token abc123 --ct0 xyz789
 ```
+
+**Environment Variables:**
+- `AUTH_TOKEN`: Twitter auth_token cookie
+- `CT0`: Twitter ct0 cookie
+- `BIRD_DB_PATH`: Path to local database
+- `BIRD_STORAGE`: Storage backend (surrealdb or memory)
+- `BIRD_DB_URL`: SurrealDB connection endpoint
 
 ### Keyboard Shortcuts
 

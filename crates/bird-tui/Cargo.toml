@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 bird-core.workspace = true
+bird-client.workspace = true
 bird-storage.workspace = true
 clap.workspace = true
 tokio.workspace = true

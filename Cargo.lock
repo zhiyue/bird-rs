@@ -536,6 +536,7 @@ name = "bird-tui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bird-client",
  "bird-core",
  "bird-storage",
  "chrono",

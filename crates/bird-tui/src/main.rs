@@ -7,6 +7,8 @@ pub mod ui;
 
 use anyhow::Result;
 use app::App;
+use bird_client::cookies::resolve_credentials;
+use bird_client::{TwitterClient, TwitterClientOptions};
 use bird_storage::{
     create_storage, default_db_path, StorageConfig, SurrealDbAuth, SurrealDbConfig,
 };
@@ -61,6 +63,18 @@ pub struct Args {
     /// Path to config file (defaults to ~/.bird/config.toml).
     #[arg(long, env = "BIRD_CONFIG")]
     config: Option<PathBuf>,
+
+    /// Twitter auth_token cookie (overrides browser extraction).
+    #[arg(long, env = "AUTH_TOKEN")]
+    auth_token: Option<String>,
+
+    /// Twitter ct0 cookie (overrides browser extraction).
+    #[arg(long, env = "CT0")]
+    ct0: Option<String>,
+
+    /// Request timeout in milliseconds.
+    #[arg(long, default_value = "30000")]
+    timeout: u64,
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -131,8 +145,36 @@ async fn main() -> Result<()> {
 
     let storage = create_storage(&storage_config).await?;
 
+    // Get current user ID
+    let user_id = match resolve_credentials(args.auth_token.as_deref(), args.ct0.as_deref(), &[]) {
+        Ok(cookies) => {
+            // Create Twitter client to fetch current user
+            let mut client = TwitterClient::new(TwitterClientOptions {
+                cookies,
+                timeout_ms: Some(args.timeout),
+                quote_depth: Some(1),
+            });
+
+            match client.get_current_user().await {
+                bird_client::CurrentUserResult::Success(user) => user.id,
+                bird_client::CurrentUserResult::Error(e) => {
+                    eprintln!("Warning: Failed to get current user: {}. Using placeholder.", e);
+                    "unknown_user".to_string()
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "Warning: Could not resolve credentials: {}. Using placeholder user ID.",
+                e
+            );
+            eprintln!("Provide --auth-token and/or --ct0 to query Twitter API for current user.");
+            "unknown_user".to_string()
+        }
+    };
+
     // Create app state
-    let mut app = App::new(storage, "default_user".to_string());
+    let mut app = App::new(storage, user_id);
 
     // Setup terminal
     enable_raw_mode()?;

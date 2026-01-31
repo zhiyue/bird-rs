@@ -158,7 +158,10 @@ async fn main() -> Result<()> {
             match client.get_current_user().await {
                 bird_client::CurrentUserResult::Success(user) => user.id,
                 bird_client::CurrentUserResult::Error(e) => {
-                    eprintln!("Warning: Failed to get current user: {}. Using placeholder.", e);
+                    eprintln!(
+                        "Warning: Failed to get current user: {}. Using placeholder.",
+                        e
+                    );
                     "unknown_user".to_string()
                 }
             }
@@ -199,6 +202,11 @@ async fn run_app(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     app: &mut App,
 ) -> Result<()> {
+    // Load initial tweets
+    if let Err(e) = data::load_page_tweets(app, &["likes", "bookmarks"]).await {
+        app.set_error(e);
+    }
+
     loop {
         // Render the UI
         terminal.draw(|f| {
@@ -208,7 +216,11 @@ async fn run_app(
         // Handle events
         match events::handle_events(app).await {
             Ok(true) => break, // User quit
-            Ok(false) => continue,
+            Ok(false) => {
+                // Check if we need to reload tweets (pagination)
+                // For now, just continue
+                continue;
+            }
             Err(e) => {
                 app.set_error(e);
             }

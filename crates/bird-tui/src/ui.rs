@@ -35,17 +35,26 @@ pub fn render(f: &mut Frame, app: &App) {
         return;
     }
 
-    // Create main layout: left panel (40%) and right panel (60%)
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+    // Create main layout with status bar at bottom
+    let main_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(10), Constraint::Length(1)])
         .split(f.area());
 
+    // Split main area into left (33%) and right (67%)
+    let content_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(33), Constraint::Percentage(67)])
+        .split(main_chunks[0]);
+
     // Render left panel (tweet list)
-    render_left_panel(f, app, chunks[0]);
+    render_left_panel(f, app, content_chunks[0]);
 
     // Render right panel (tweet details)
-    render_right_panel(f, app, chunks[1]);
+    render_right_panel(f, app, content_chunks[1]);
+
+    // Render status bar
+    render_status_bar(f, app, main_chunks[1]);
 }
 
 /// Render the left panel with tweet list.
@@ -101,14 +110,14 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
 /// Render the right panel with tweet details.
 fn render_right_panel(f: &mut Frame, app: &App, area: Rect) {
     if let Some(tweet) = app.selected_tweet() {
-        // Create sub-layout for detail panel: title area and content area
+        // Create sub-layout for detail panel: metadata area and content area
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(10)])
+            .constraints([Constraint::Length(8), Constraint::Min(10)])
             .split(area);
 
-        // Metadata section
-        let metadata = vec![
+        // Metadata section - enhanced with more details
+        let mut metadata = vec![
             Line::from(vec![
                 Span::styled("Author: ", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(format!(
@@ -126,26 +135,58 @@ fn render_right_panel(f: &mut Frame, app: &App, area: Rect) {
                         .unwrap_or_else(|| "—".to_string()),
                 ),
             ]),
-            Line::from(vec![
-                Span::styled("Resonance: ", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(format!(
-                    "{:.1} (♡:{} 📌:{} ↩:{} 🔄:{})",
-                    tweet.resonance_score.total,
-                    if tweet.resonance_score.liked {
-                        "✓"
-                    } else {
-                        "—"
-                    },
-                    if tweet.resonance_score.bookmarked {
-                        "✓"
-                    } else {
-                        "—"
-                    },
-                    tweet.resonance_score.reply_count,
-                    tweet.resonance_score.retweet_count,
-                )),
-            ]),
         ];
+
+        // Discovered in collections
+        if !tweet.collections.is_empty() {
+            let mut collection_line = vec![Span::styled(
+                "Discovered: ",
+                Style::default().add_modifier(Modifier::BOLD),
+            )];
+
+            for collection in &tweet.collections {
+                let emoji = match collection.as_str() {
+                    "likes" => "❤  Liked",
+                    "bookmarks" => "🔖  Bookmarked",
+                    "user_tweets" => "📝  Your tweet",
+                    _ => "•",
+                };
+                collection_line.push(Span::raw(format!("{}   ", emoji)));
+            }
+            metadata.push(Line::from(collection_line));
+        }
+
+        // Interactions - show what this tweet triggered
+        let interactions_line = vec![
+            Span::styled("Interactions: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(format!(
+                "↩  {}   💬  {}   🔄  {} ",
+                tweet.resonance_score.reply_count,
+                tweet.resonance_score.quote_count,
+                tweet.resonance_score.retweet_count
+            )),
+        ];
+        metadata.push(Line::from(interactions_line));
+
+        // Resonance score breakdown
+        let score_line = vec![
+            Span::styled("Resonance: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{:.1}", tweet.resonance_score.total),
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(format!(
+                "  |  ❤ {:.2}  ↩ {:.2}  💬 {:.2}  🔄 {:.2}  📌 {:.2}",
+                if tweet.resonance_score.liked { 0.25 } else { 0.0 },
+                (tweet.resonance_score.reply_count as f64) * 0.5,
+                (tweet.resonance_score.quote_count as f64) * 0.75,
+                (tweet.resonance_score.retweet_count as f64) * 0.5,
+                if tweet.resonance_score.bookmarked { 0.5 } else { 0.0 }
+            )),
+        ];
+        metadata.push(Line::from(score_line));
+
+        metadata.push(Line::from("")); // Spacing
 
         let metadata_block = Paragraph::new(metadata)
             .block(Block::default().borders(Borders::BOTTOM))
@@ -316,6 +357,28 @@ fn truncate_text(text: &str, max_len: usize) -> String {
     } else {
         format!("{}…", &text[..max_len - 1])
     }
+}
+
+/// Render the status bar at the bottom showing hotkeys.
+fn render_status_bar(f: &mut Frame, _app: &App, area: Rect) {
+    let status = Line::from(vec![
+        Span::styled("↑↓", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" Navigate  "),
+        Span::styled("←→", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" Page  "),
+        Span::styled("Tab", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" Focus  "),
+        Span::styled("Ctrl+?", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" Help  "),
+        Span::styled("q", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" Quit"),
+    ]);
+
+    let status_widget = Paragraph::new(status)
+        .style(Style::default().bg(Color::DarkGray).fg(Color::White))
+        .alignment(Alignment::Left);
+
+    f.render_widget(status_widget, area);
 }
 
 #[cfg(test)]

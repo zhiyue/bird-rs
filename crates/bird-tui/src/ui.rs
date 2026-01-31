@@ -66,13 +66,13 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
         .map(|(i, tweet)| {
             let emoji = collection_emoji(&tweet.collections);
             let id_display = truncate_id(&tweet.id, 8);
-            let author_display = truncate_text(&tweet.author_username, 10);
+            let author_display = truncate_text(&tweet.author_username, 14);
             let score_display = format!("{:.1}", tweet.resonance_score.total);
-            let headline = truncate_text(&tweet.headline, 35);
+            let headline = truncate_text(&tweet.headline, 30);
 
             // Multi-column layout: ID | Author | Score | Headline | Collections
             let content = format!(
-                "{:8} | {:10} | {:5} | {:35} {}",
+                "{:8} | {:14} | {:5} | {:30} {}",
                 id_display, author_display, score_display, headline, emoji
             );
 

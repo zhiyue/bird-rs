@@ -207,6 +207,8 @@ async fn run_app(
         app.set_error(e);
     }
 
+    let mut last_page = app.current_page;
+
     loop {
         // Render the UI
         terminal.draw(|f| {
@@ -217,8 +219,13 @@ async fn run_app(
         match events::handle_events(app).await {
             Ok(true) => break, // User quit
             Ok(false) => {
-                // Check if we need to reload tweets (pagination)
-                // For now, just continue
+                // Check if we need to reload tweets (pagination changed)
+                if app.current_page != last_page {
+                    if let Err(e) = data::load_page_tweets(app, &["likes", "bookmarks"]).await {
+                        app.set_error(e);
+                    }
+                    last_page = app.current_page;
+                }
                 continue;
             }
             Err(e) => {

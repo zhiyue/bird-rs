@@ -41,10 +41,10 @@ pub fn render(f: &mut Frame, app: &App) {
         .constraints([Constraint::Min(10), Constraint::Length(1)])
         .split(f.area());
 
-    // Split main area into left (33%) and right (67%)
+    // Split main area into left (67%) and right (33%) - 2:1 ratio
     let content_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(33), Constraint::Percentage(67)])
+        .constraints([Constraint::Percentage(67), Constraint::Percentage(33)])
         .split(main_chunks[0]);
 
     // Render left panel (tweet list)
@@ -158,7 +158,10 @@ fn render_right_panel(f: &mut Frame, app: &App, area: Rect) {
 
         // Interactions - show what this tweet triggered
         let interactions_line = vec![
-            Span::styled("Interactions: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Interactions: ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::raw(format!(
                 "↩  {}   💬  {}   🔄  {} ",
                 tweet.resonance_score.reply_count,
@@ -173,15 +176,25 @@ fn render_right_panel(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("Resonance: ", Style::default().add_modifier(Modifier::BOLD)),
             Span::styled(
                 format!("{:.1}", tweet.resonance_score.total),
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw(format!(
                 "  |  ❤ {:.2}  ↩ {:.2}  💬 {:.2}  🔄 {:.2}  📌 {:.2}",
-                if tweet.resonance_score.liked { 0.25 } else { 0.0 },
+                if tweet.resonance_score.liked {
+                    0.25
+                } else {
+                    0.0
+                },
                 (tweet.resonance_score.reply_count as f64) * 0.5,
                 (tweet.resonance_score.quote_count as f64) * 0.75,
                 (tweet.resonance_score.retweet_count as f64) * 0.5,
-                if tweet.resonance_score.bookmarked { 0.5 } else { 0.0 }
+                if tweet.resonance_score.bookmarked {
+                    0.5
+                } else {
+                    0.0
+                }
             )),
         ];
         metadata.push(Line::from(score_line));

@@ -87,13 +87,12 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
         ..area
     };
 
-    // Define column constraints: ID | Author | Score | Headline | Collections
+    // Define column constraints: ID | Author | Score | Headline
     let widths = [
-        Constraint::Length(8),  // ID
+        Constraint::Length(12), // ID (wider)
         Constraint::Length(14), // Author
         Constraint::Length(5),  // Score
-        Constraint::Length(30), // Headline
-        Constraint::Fill(1),    // Collections (takes remaining space)
+        Constraint::Fill(1),    // Headline (takes remaining space)
     ];
 
     // Get tweets to display (filtered or all)
@@ -105,11 +104,10 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
         .iter()
         .enumerate()
         .map(|(i, tweet)| {
-            let id_display = truncate_id(&tweet.id, 8);
+            let id_display = truncate_id(&tweet.id, 12);
             let author_display = truncate_text(&tweet.author_username, 14);
             let score_display = format!("{:.1}", tweet.resonance_score.total);
-            let headline = truncate_text(&tweet.headline, 30);
-            let emoji = collection_emoji(&tweet.collections);
+            let headline = truncate_text(&tweet.headline, 100); // Much wider now that it fills space
 
             let style = if i == selected_index {
                 Style::default()
@@ -125,7 +123,6 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
                 Cell::from(author_display),
                 Cell::from(score_display),
                 Cell::from(headline),
-                Cell::from(emoji),
             ])
             .style(style)
         })
@@ -134,7 +131,7 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
     // Create table with header
     let table = Table::new(rows, widths)
         .header(
-            Row::new(vec!["ID", "Author", "Score", "Headline", "Collections"])
+            Row::new(vec!["ID", "Author", "Score", "Headline"])
                 .style(Style::default().add_modifier(Modifier::BOLD)),
         )
         .block(
@@ -611,6 +608,7 @@ fn days_in_month(year: i32, month: u32) -> u32 {
 }
 
 /// Get collection emoji representation.
+#[allow(dead_code)]
 fn collection_emoji(collections: &[String]) -> String {
     let mut result = String::new();
     for collection in collections {

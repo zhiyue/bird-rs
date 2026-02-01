@@ -32,6 +32,12 @@ pub fn render(f: &mut Frame, app: &App) {
         // Still render main content behind the modal
     }
 
+    // If calendar is shown, show calendar modal
+    if app.show_calendar {
+        render_calendar(f, app);
+        // Still render main content behind the modal
+    }
+
     // If error, show error
     if let Some(error) = &app.error {
         render_error(f, app, error);
@@ -191,14 +197,19 @@ fn render_right_panel(f: &mut Frame, app: &App, area: Rect) {
         ]));
 
         // Author interaction stats line
-        if tweet.author_liked_count > 0 || tweet.author_quoted_count > 0 || tweet.author_retweeted_count > 0 {
+        if tweet.author_liked_count > 0
+            || tweet.author_quoted_count > 0
+            || tweet.author_retweeted_count > 0
+        {
             let author_with_padding = " ".repeat(label_width.saturating_sub("Engagement:".len()));
             metadata.push(Line::from(vec![
                 Span::styled("Engagement:", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(author_with_padding),
                 Span::raw(format!(
                     "❤ {} liked  💬 {} quoted  🔄 {} retweeted",
-                    tweet.author_liked_count, tweet.author_quoted_count, tweet.author_retweeted_count
+                    tweet.author_liked_count,
+                    tweet.author_quoted_count,
+                    tweet.author_retweeted_count
                 )),
             ]));
         }
@@ -480,6 +491,121 @@ fn render_search_modal(f: &mut Frame, app: &App) {
     if !results_count.is_empty() {
         let results_widget = Paragraph::new(results_count).style(Style::default().fg(Color::Gray));
         f.render_widget(results_widget, results_rect);
+    }
+}
+
+/// Render calendar modal for chronological navigation.
+fn render_calendar(f: &mut Frame, app: &App) {
+    let size = f.area();
+
+    // Create a centered modal for the calendar
+    let modal_width = 50;
+    let modal_height = 14;
+    let x = (size.width.saturating_sub(modal_width)) / 2;
+    let y = (size.height.saturating_sub(modal_height)) / 2;
+
+    let modal_area = Rect {
+        x,
+        y,
+        width: modal_width,
+        height: modal_height,
+    };
+
+    // Clear background
+    f.render_widget(Clear, modal_area);
+
+    // Background block with title showing current month/year
+    let month_names = [
+        "",
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+    let month_str = format!(
+        "{} {}",
+        month_names[app.calendar_display_month.month() as usize],
+        app.calendar_display_month.year()
+    );
+    f.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .title(format!(" {} (← → to navigate, Esc to close) ", month_str))
+            .style(Style::default().fg(app.theme.text)),
+        modal_area,
+    );
+
+    // Calendar inner area
+    let inner = Rect {
+        x: modal_area.x + 2,
+        y: modal_area.y + 2,
+        width: modal_area.width.saturating_sub(4),
+        height: modal_area.height.saturating_sub(4),
+    };
+
+    // Build a simple text-based calendar
+    let year = app.calendar_display_month.year();
+    let month = app.calendar_display_month.month() as u32;
+
+    let mut cal_lines = vec![Line::from("Su  Mo  Tu  We  Th  Fr  Sa")];
+
+    // Get first day of month
+    if let Ok(first_day) =
+        time::Date::from_calendar_date(year, time::Month::try_from(month as u8).unwrap(), 1)
+    {
+        let first_weekday = first_day.weekday();
+        let days_in_month = days_in_month(year, month);
+
+        // Create first week line with leading spaces
+        let mut current_line = vec![];
+        let start_offset = (first_weekday.number_days_from_sunday() as usize) % 7;
+
+        for _ in 0..start_offset {
+            current_line.push(Span::raw("    "));
+        }
+
+        for day in 1..=days_in_month {
+            current_line.push(Span::raw(format!("{:2}  ", day)));
+
+            if (start_offset + day as usize).is_multiple_of(7) || day == days_in_month {
+                cal_lines.push(Line::from(current_line.clone()));
+                current_line.clear();
+            }
+        }
+    }
+
+    cal_lines.push(Line::from(""));
+    cal_lines.push(Line::from(Span::styled(
+        "Select a date to filter tweets by discovery date",
+        Style::default().fg(Color::Gray),
+    )));
+
+    let calendar_widget = Paragraph::new(cal_lines).style(Style::default());
+    f.render_widget(calendar_widget, inner);
+}
+
+/// Get number of days in a month.
+fn days_in_month(year: i32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 {
+                29
+            } else {
+                28
+            }
+        }
+        _ => 0,
     }
 }
 

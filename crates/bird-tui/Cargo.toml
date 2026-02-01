@@ -28,8 +28,9 @@ toml.workspace = true
 thiserror.workspace = true
 
 # TUI
-ratatui = "0.28"
+ratatui = { version = "0.28", features = ["widget-calendar"] }
 crossterm = "0.28"
+time = "0.3"
 
 [dev-dependencies]
 tempfile.workspace = true

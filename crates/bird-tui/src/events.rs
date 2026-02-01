@@ -63,6 +63,27 @@ fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<bool, String> {
         }
     }
 
+    // If calendar is shown, handle calendar navigation
+    if app.show_calendar {
+        match key.code {
+            KeyCode::Esc => {
+                app.toggle_calendar();
+                return Ok(false);
+            }
+            KeyCode::Left => {
+                app.calendar_prev_month();
+                return Ok(false);
+            }
+            KeyCode::Right => {
+                app.calendar_next_month();
+                return Ok(false);
+            }
+            _ => {
+                return Ok(false);
+            }
+        }
+    }
+
     // Handle regular navigation
     match key.code {
         // Quit
@@ -83,6 +104,12 @@ fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<bool, String> {
         // Search toggle
         KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.toggle_search();
+            Ok(false)
+        }
+
+        // Calendar toggle
+        KeyCode::Char('c') => {
+            app.toggle_calendar();
             Ok(false)
         }
 

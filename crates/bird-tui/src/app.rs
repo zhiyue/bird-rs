@@ -1,11 +1,13 @@
 //! Application state management for bird-tui.
 
 use bird_storage::{ResonanceScore, Storage};
+use chrono::Datelike;
 use ratatui::style::Color;
 use ratatui::widgets::TableState;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use time::{Date, Month};
 
 /// Collection membership information for a tweet.
 #[derive(Debug, Clone)]
@@ -162,6 +164,15 @@ pub struct App {
 
     /// Last search query that was processed (for result caching).
     pub last_processed_search: String,
+
+    /// Whether calendar view is shown.
+    pub show_calendar: bool,
+
+    /// Currently selected date in calendar (for filtering tweets).
+    pub calendar_selected_date: Option<Date>,
+
+    /// Which month is displayed in calendar.
+    pub calendar_display_month: Date,
 }
 
 impl App {
@@ -191,6 +202,17 @@ impl App {
             filtered_indices: Vec::new(),
             search_input_time: Instant::now(),
             last_processed_search: String::new(),
+            show_calendar: false,
+            calendar_selected_date: None,
+            calendar_display_month: {
+                let today = chrono::Local::now();
+                Date::from_calendar_date(
+                    today.year(),
+                    Month::try_from(today.month() as u8).unwrap(),
+                    1,
+                )
+                .unwrap()
+            },
         }
     }
 
@@ -331,6 +353,48 @@ impl App {
         } else {
             // Show all tweets
             self.tweets.iter().collect()
+        }
+    }
+
+    /// Toggle calendar view.
+    pub fn toggle_calendar(&mut self) {
+        self.show_calendar = !self.show_calendar;
+        if !self.show_calendar {
+            self.calendar_selected_date = None;
+        }
+    }
+
+    /// Navigate calendar to previous month.
+    pub fn calendar_prev_month(&mut self) {
+        let (year, month_num) = if self.calendar_display_month.month() as u32 == 1 {
+            (self.calendar_display_month.year() - 1, 12)
+        } else {
+            (
+                self.calendar_display_month.year(),
+                self.calendar_display_month.month() as u32 - 1,
+            )
+        };
+        if let Ok(month) = Month::try_from(month_num as u8) {
+            if let Ok(date) = Date::from_calendar_date(year, month, 1) {
+                self.calendar_display_month = date;
+            }
+        }
+    }
+
+    /// Navigate calendar to next month.
+    pub fn calendar_next_month(&mut self) {
+        let (year, month_num) = if self.calendar_display_month.month() as u32 == 12 {
+            (self.calendar_display_month.year() + 1, 1)
+        } else {
+            (
+                self.calendar_display_month.year(),
+                self.calendar_display_month.month() as u32 + 1,
+            )
+        };
+        if let Ok(month) = Month::try_from(month_num as u8) {
+            if let Ok(date) = Date::from_calendar_date(year, month, 1) {
+                self.calendar_display_month = date;
+            }
         }
     }
 }

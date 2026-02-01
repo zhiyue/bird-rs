@@ -78,6 +78,9 @@ pub struct App {
 
     /// Current user ID.
     pub user_id: String,
+
+    /// Scroll position in the tweet list (for scrollbar display).
+    pub list_scroll_pos: u16,
 }
 
 impl App {
@@ -99,6 +102,7 @@ impl App {
             loading: false,
             storage,
             user_id,
+            list_scroll_pos: 0,
         }
     }
 

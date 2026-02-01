@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table, Wrap},
     Frame,
 };
 
@@ -57,15 +57,28 @@ pub fn render(f: &mut Frame, app: &App) {
     render_status_bar(f, app, main_chunks[1]);
 }
 
-/// Render the left panel with tweet list (table with columns).
+/// Render the left panel with tweet list (table with columns and scrollbar).
 fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
+    // Split area to make room for scrollbar on the right
+    let scrollbar_area = Rect {
+        x: area.right().saturating_sub(1),
+        y: area.y.saturating_add(1), // Account for border
+        width: 1,
+        height: area.height.saturating_sub(2), // Account for borders
+    };
+
+    let table_area = Rect {
+        width: area.width.saturating_sub(1), // Make room for scrollbar
+        ..area
+    };
+
     // Define column constraints: ID | Author | Score | Headline | Collections
     let widths = [
-        Constraint::Length(8),   // ID
-        Constraint::Length(14),  // Author
-        Constraint::Length(5),   // Score
-        Constraint::Length(30),  // Headline
-        Constraint::Fill(1),     // Collections (takes remaining space)
+        Constraint::Length(8),  // ID
+        Constraint::Length(14), // Author
+        Constraint::Length(5),  // Score
+        Constraint::Length(30), // Headline
+        Constraint::Fill(1),    // Collections (takes remaining space)
     ];
 
     // Build table rows
@@ -101,31 +114,43 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     // Create table with header
-    let table = Table::new(
-        rows,
-        widths,
-    )
-    .header(
-        Row::new(vec!["ID", "Author", "Score", "Headline", "Collections"])
-            .style(Style::default().add_modifier(Modifier::BOLD))
-    )
-    .block(
-        Block::default()
-            .title(format!(
-                " Tweets (Page {}/{}) ",
-                app.current_page + 1,
-                (app.total_count as u32).div_ceil(app.page_size)
-            ))
-            .borders(Borders::ALL)
-            .border_type(ratatui::widgets::BorderType::Rounded),
-    )
-    .style(if app.focus == Focus::List {
-        Style::default().fg(Color::Green)
-    } else {
-        Style::default()
-    });
+    let table = Table::new(rows, widths)
+        .header(
+            Row::new(vec!["ID", "Author", "Score", "Headline", "Collections"])
+                .style(Style::default().add_modifier(Modifier::BOLD)),
+        )
+        .block(
+            Block::default()
+                .title(format!(
+                    " Tweets (Page {}/{}) ",
+                    app.current_page + 1,
+                    (app.total_count as u32).div_ceil(app.page_size)
+                ))
+                .borders(Borders::ALL)
+                .border_type(ratatui::widgets::BorderType::Rounded),
+        )
+        .style(if app.focus == Focus::List {
+            Style::default().fg(Color::Green)
+        } else {
+            Style::default()
+        });
 
-    f.render_widget(table, area);
+    f.render_widget(table, table_area);
+
+    // Render scrollbar
+    if !app.tweets.is_empty() {
+        let mut scrollbar_state = ScrollbarState::new(app.tweets.len())
+            .position(app.selected_index);
+
+        f.render_stateful_widget(
+            Scrollbar::default()
+                .orientation(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(Some("▲"))
+                .end_symbol(Some("▼")),
+            scrollbar_area,
+            &mut scrollbar_state,
+        );
+    }
 }
 
 /// Render the right panel with tweet details.

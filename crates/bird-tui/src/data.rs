@@ -110,7 +110,10 @@ async fn preload_adjacent_pages(app: &mut App, collections: &[&str]) -> Result<(
         let page_num = app.current_page as i32 + offset_delta;
 
         // Skip if page is out of bounds or already cached
-        if page_num < 0 || page_num >= total_pages as i32 || app.page_cache.contains_key(&(page_num as u32)) {
+        if page_num < 0
+            || page_num >= total_pages as i32
+            || app.page_cache.contains_key(&(page_num as u32))
+        {
             continue;
         }
 
@@ -177,12 +180,26 @@ pub async fn compute_resonance_scores(app: &mut App) -> Result<(), String> {
     Ok(())
 }
 
-/// Truncate text to a maximum length, adding ellipsis if needed.
+/// Truncate text to a maximum length, adding ellipsis if needed. UTF-8 safe.
 fn truncate_text(text: &str, max_len: usize) -> String {
-    if text.len() <= max_len {
-        text.to_string()
+    let mut result = String::new();
+    let mut byte_count = 0;
+    let limit = max_len.saturating_sub(1);
+
+    for ch in text.chars() {
+        let ch_len = ch.len_utf8();
+        if byte_count + ch_len > limit {
+            result.push('…');
+            break;
+        }
+        result.push(ch);
+        byte_count += ch_len;
+    }
+
+    if result.is_empty() && !text.is_empty() {
+        String::from("…")
     } else {
-        format!("{}…", &text[..max_len - 1])
+        result
     }
 }
 

@@ -1,6 +1,6 @@
 //! UI rendering for bird-tui using ratatui.
 
-use crate::app::{App, Focus};
+use crate::app::{App, CalendarFocus, CalendarRange, Focus};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -26,7 +26,13 @@ pub fn render(f: &mut Frame, app: &App) {
         return;
     }
 
-    // If calendar is shown, show calendar modal
+    // If error, show error
+    if let Some(error) = &app.error {
+        render_error(f, app, error);
+        return;
+    }
+
+    // If calendar is shown, show calendar view
     if app.show_calendar {
         render_calendar(f, app);
         return;
@@ -36,12 +42,6 @@ pub fn render(f: &mut Frame, app: &App) {
     let show_search = app.show_search;
     if show_search {
         render_search_modal(f, app);
-    }
-
-    // If error, show error
-    if let Some(error) = &app.error {
-        render_error(f, app, error);
-        return;
     }
 
     // If no tweets, show empty state
@@ -370,7 +370,7 @@ fn render_help(f: &mut Frame, _app: &App) {
 
     // Create a centered modal
     let modal_width = 60;
-    let modal_height = 20;
+    let modal_height = 24;
     let x = (size.width.saturating_sub(modal_width)) / 2;
     let y = (size.height.saturating_sub(modal_height)) / 2;
 
@@ -399,16 +399,20 @@ fn render_help(f: &mut Frame, _app: &App) {
                 .fg(Color::Yellow),
         )),
         Line::from(""),
-        Line::from("↑/↓        Navigate list"),
-        Line::from("←/→        Previous/Next page (or month in calendar)"),
-        Line::from("Tab        Switch focus (list ↔ detail)"),
-        Line::from("PgUp/PgDn  Scroll detail panel"),
+        Line::from("↑/↓        Navigate list (weeks in calendar)"),
+        Line::from("←/→        Previous/Next page (days in calendar)"),
+        Line::from("Tab        Switch focus (list ↔ detail / calendar ↔ tweets)"),
+        Line::from("PgUp/PgDn  Scroll detail panel (months in calendar)"),
         Line::from("c          Toggle calendar (chronological view)"),
+        Line::from("Home/g     Jump to today (calendar)"),
+        Line::from("m/w/d      Calendar range (month/week/day)"),
+        Line::from("Enter      Open selected tweet (calendar list)"),
         Line::from("o          Open tweet in browser"),
         Line::from("Ctrl+F     Search tweets"),
         Line::from("Ctrl+T     Toggle dark/light theme"),
         Line::from("Ctrl+?     Toggle help"),
-        Line::from("q/Esc      Quit"),
+        Line::from("Esc        Close modals / Quit"),
+        Line::from("q          Quit"),
         Line::from(""),
         Line::from(Span::styled(
             "Press Ctrl+? or Esc to close",
@@ -492,27 +496,24 @@ fn render_search_modal(f: &mut Frame, app: &App) {
     }
 }
 
-/// Render calendar modal for chronological navigation.
+/// Render calendar view for chronological navigation.
 fn render_calendar(f: &mut Frame, app: &App) {
-    let size = f.area();
+    let main_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(8), Constraint::Length(1)])
+        .split(f.area());
 
-    // Create a centered modal for the calendar
-    let modal_width = 50;
-    let modal_height = 14;
-    let x = (size.width.saturating_sub(modal_width)) / 2;
-    let y = (size.height.saturating_sub(modal_height)) / 2;
+    let content_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
+        .split(main_chunks[0]);
 
-    let modal_area = Rect {
-        x,
-        y,
-        width: modal_width,
-        height: modal_height,
-    };
+    render_calendar_panel(f, app, content_chunks[0]);
+    render_calendar_tweets_panel(f, app, content_chunks[1]);
+    render_status_bar(f, app, main_chunks[1]);
+}
 
-    // Clear background
-    f.render_widget(Clear, modal_area);
-
-    // Background block with title showing current month/year
+fn render_calendar_panel(f: &mut Frame, app: &App, area: Rect) {
     let month_names = [
         "",
         "January",
@@ -533,62 +534,190 @@ fn render_calendar(f: &mut Frame, app: &App) {
         month_names[app.calendar_display_month.month() as usize],
         app.calendar_display_month.year()
     );
-    f.render_widget(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(ratatui::widgets::BorderType::Rounded)
-            .title(format!(" {} (← → to navigate, Esc to close) ", month_str))
-            .style(Style::default().fg(app.theme.text)),
-        modal_area,
-    );
 
-    // Calendar inner area
-    let inner = Rect {
-        x: modal_area.x + 2,
-        y: modal_area.y + 2,
-        width: modal_area.width.saturating_sub(4),
-        height: modal_area.height.saturating_sub(4),
+    let border_style = if app.calendar_focus == CalendarFocus::Calendar {
+        Style::default().fg(app.theme.primary)
+    } else {
+        Style::default().fg(app.theme.border)
     };
 
-    // Build a simple text-based calendar
+    let block = Block::default()
+        .title(format!(" Calendar — {} ", month_str))
+        .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .style(border_style);
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
     let year = app.calendar_display_month.year();
     let month = app.calendar_display_month.month() as u32;
+    let today = chrono::Local::now().date_naive();
+    let selected_naive = app.calendar_selected_date.and_then(|date| {
+        chrono::NaiveDate::from_ymd_opt(date.year(), date.month() as u32, date.day() as u32)
+    });
 
     let mut cal_lines = vec![Line::from("Su  Mo  Tu  We  Th  Fr  Sa")];
 
-    // Get first day of month
-    if let Ok(first_day) =
-        time::Date::from_calendar_date(year, time::Month::try_from(month as u8).unwrap(), 1)
-    {
-        let first_weekday = first_day.weekday();
-        let days_in_month = days_in_month(year, month);
+    if let Ok(month_enum) = time::Month::try_from(month as u8) {
+        if let Ok(first_day) = time::Date::from_calendar_date(year, month_enum, 1) {
+            let first_weekday = first_day.weekday();
+            let days = days_in_month(year, month);
 
-        // Create first week line with leading spaces
-        let mut current_line = vec![];
-        let start_offset = (first_weekday.number_days_from_sunday() as usize) % 7;
+            let mut current_line = vec![];
+            let start_offset = (first_weekday.number_days_from_sunday() as usize) % 7;
 
-        for _ in 0..start_offset {
-            current_line.push(Span::raw("    "));
-        }
+            for _ in 0..start_offset {
+                current_line.push(Span::raw("    "));
+            }
 
-        for day in 1..=days_in_month {
-            current_line.push(Span::raw(format!("{:2}  ", day)));
+            for day in 1..=days {
+                let day_naive = chrono::NaiveDate::from_ymd_opt(year, month, day);
+                let is_future = day_naive.map(|d| d > today).unwrap_or(false);
+                let is_selected = selected_naive
+                    .zip(day_naive)
+                    .map(|(s, d)| s == d)
+                    .unwrap_or(false);
 
-            if (start_offset + day as usize).is_multiple_of(7) || day == days_in_month {
-                cal_lines.push(Line::from(current_line.clone()));
-                current_line.clear();
+                let mut style = Style::default();
+                if is_future {
+                    style = style.fg(Color::DarkGray);
+                }
+                if is_selected {
+                    style = style
+                        .bg(app.theme.highlight)
+                        .fg(app.theme.text)
+                        .add_modifier(Modifier::BOLD);
+                }
+
+                current_line.push(Span::styled(format!("{:2}  ", day), style));
+
+                if (start_offset + day as usize).is_multiple_of(7) || day == days {
+                    cal_lines.push(Line::from(current_line.clone()));
+                    current_line.clear();
+                }
             }
         }
     }
 
     cal_lines.push(Line::from(""));
     cal_lines.push(Line::from(Span::styled(
-        "Select a date to filter tweets by discovery date",
+        format!("Range: {}", format_calendar_range_label(app)),
+        Style::default().fg(Color::Gray),
+    )));
+    cal_lines.push(Line::from(Span::styled(
+        format!("Selected: {}", format_calendar_selected_label(app)),
         Style::default().fg(Color::Gray),
     )));
 
     let calendar_widget = Paragraph::new(cal_lines).style(Style::default());
     f.render_widget(calendar_widget, inner);
+}
+
+fn render_calendar_tweets_panel(f: &mut Frame, app: &App, area: Rect) {
+    let border_style = if app.calendar_focus == CalendarFocus::Tweets {
+        Style::default().fg(app.theme.primary)
+    } else {
+        Style::default().fg(app.theme.border)
+    };
+
+    let range_label = format_calendar_range_label(app);
+    let title = format!(" Tweets ({}) — {} ", app.calendar_tweets.len(), range_label);
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .style(border_style);
+
+    if app.calendar_tweets.is_empty() {
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        let empty = Paragraph::new("No tweets in this range.")
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true });
+        f.render_widget(empty, inner);
+        return;
+    }
+
+    let widths = [
+        Constraint::Length(12),
+        Constraint::Length(14),
+        Constraint::Fill(1),
+    ];
+
+    let selected_index = app.calendar_table_state.selected();
+
+    let rows: Vec<Row> = app
+        .calendar_tweets
+        .iter()
+        .enumerate()
+        .map(|(i, tweet)| {
+            let date_display = format_calendar_list_date(app, tweet);
+            let author_display = truncate_text(&tweet.author_username, 14);
+            let headline = truncate_text(&tweet.headline, 120);
+
+            let mut style = Style::default();
+            if app.calendar_focus == CalendarFocus::Tweets && selected_index == Some(i) {
+                style = style
+                    .bg(app.theme.highlight)
+                    .fg(app.theme.text)
+                    .add_modifier(Modifier::BOLD);
+            }
+
+            Row::new(vec![
+                Cell::from(date_display),
+                Cell::from(author_display),
+                Cell::from(headline),
+            ])
+            .style(style)
+        })
+        .collect();
+
+    let table = Table::new(rows, widths)
+        .header(
+            Row::new(vec!["Date", "Author", "Headline"])
+                .style(Style::default().add_modifier(Modifier::BOLD)),
+        )
+        .block(block);
+
+    f.render_widget(table, area);
+}
+
+fn format_calendar_range_label(app: &App) -> String {
+    let Some((start, end)) = app.calendar_range_naive() else {
+        return "—".to_string();
+    };
+
+    match app.calendar_range {
+        CalendarRange::Day => start.format("%b %d, %Y").to_string(),
+        CalendarRange::Week => format!("{} – {}", start.format("%b %d"), end.format("%b %d")),
+        CalendarRange::Month => format!("{} {}", start.format("%B"), start.format("%Y")),
+    }
+}
+
+fn format_calendar_selected_label(app: &App) -> String {
+    let Some(selected) = app.calendar_selected_date else {
+        return "—".to_string();
+    };
+    chrono::NaiveDate::from_ymd_opt(
+        selected.year(),
+        selected.month() as u32,
+        selected.day() as u32,
+    )
+    .map(|date| date.format("%b %d, %Y").to_string())
+    .unwrap_or_else(|| "—".to_string())
+}
+
+fn format_calendar_list_date(app: &App, tweet: &crate::app::TweetDisplayData) -> String {
+    let Some(dt) = tweet.created_at_local.as_ref() else {
+        return "—".to_string();
+    };
+
+    match app.calendar_range {
+        CalendarRange::Day => dt.format("%b %d %I%p").to_string().to_lowercase(),
+        _ => dt.format("%b %d").to_string(),
+    }
 }
 
 /// Get number of days in a month.
@@ -670,20 +799,63 @@ fn truncate_text(text: &str, max_len: usize) -> String {
 
 /// Render the status bar at the bottom showing hotkeys.
 fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
-    let status = Line::from(vec![
-        Span::styled("↑↓", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" Navigate  "),
-        Span::styled("←→", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" Page  "),
-        Span::styled("Ctrl+F", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" Search  "),
-        Span::styled("Ctrl+T", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" Theme  "),
-        Span::styled("Ctrl+?", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" Help  "),
-        Span::styled("q", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" Quit"),
-    ]);
+    let status = if app.show_calendar {
+        let focus_label = match app.calendar_focus {
+            CalendarFocus::Calendar => "Calendar",
+            CalendarFocus::Tweets => "Tweets",
+        };
+        let mut spans = vec![
+            Span::styled("Arrows", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Move  "),
+            Span::styled("PgUp/PgDn", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Month  "),
+            Span::styled("Tab", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(format!(" Focus({})  ", focus_label)),
+            Span::styled("M/W/D", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Range  "),
+            Span::styled("Home/g", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Today  "),
+        ];
+
+        if app.calendar_focus == CalendarFocus::Tweets {
+            spans.push(Span::styled(
+                "Enter/o",
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::raw(" Open  "));
+        }
+
+        spans.push(Span::styled(
+            "q",
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::raw(" Quit  "));
+
+        spans.push(Span::styled(
+            "Esc",
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::raw(" Close"));
+
+        Line::from(spans)
+    } else {
+        Line::from(vec![
+            Span::styled("↑↓", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Navigate  "),
+            Span::styled("←→", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Page  "),
+            Span::styled("c", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Calendar  "),
+            Span::styled("Ctrl+F", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Search  "),
+            Span::styled("Ctrl+T", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Theme  "),
+            Span::styled("Ctrl+?", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Help  "),
+            Span::styled("q", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Quit"),
+        ])
+    };
 
     let status_widget = Paragraph::new(status)
         .style(Style::default().bg(app.theme.border).fg(app.theme.text))

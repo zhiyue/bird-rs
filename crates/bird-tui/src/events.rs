@@ -66,16 +66,79 @@ fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<bool, String> {
     // If calendar is shown, handle calendar navigation
     if app.show_calendar {
         match key.code {
-            KeyCode::Esc => {
+            KeyCode::Char('q') => {
+                return Ok(true);
+            }
+            KeyCode::Char('?') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.toggle_help();
+                return Ok(false);
+            }
+            KeyCode::Esc | KeyCode::Char('c') => {
                 app.toggle_calendar();
                 return Ok(false);
             }
-            KeyCode::Left => {
+            KeyCode::Tab => {
+                app.calendar_toggle_focus();
+                return Ok(false);
+            }
+            KeyCode::Home | KeyCode::Char('g') => {
+                app.calendar_go_today();
+                return Ok(false);
+            }
+            KeyCode::PageUp => {
                 app.calendar_prev_month();
                 return Ok(false);
             }
-            KeyCode::Right => {
+            KeyCode::PageDown => {
                 app.calendar_next_month();
+                return Ok(false);
+            }
+            KeyCode::Char('m') => {
+                app.calendar_set_range(crate::app::CalendarRange::Month);
+                return Ok(false);
+            }
+            KeyCode::Char('w') => {
+                app.calendar_set_range(crate::app::CalendarRange::Week);
+                return Ok(false);
+            }
+            KeyCode::Char('d') => {
+                app.calendar_set_range(crate::app::CalendarRange::Day);
+                return Ok(false);
+            }
+            KeyCode::Up => {
+                if app.calendar_focus == crate::app::CalendarFocus::Calendar {
+                    app.calendar_move_weeks(-1);
+                } else {
+                    app.calendar_select_prev();
+                }
+                return Ok(false);
+            }
+            KeyCode::Down => {
+                if app.calendar_focus == crate::app::CalendarFocus::Calendar {
+                    app.calendar_move_weeks(1);
+                } else {
+                    app.calendar_select_next();
+                }
+                return Ok(false);
+            }
+            KeyCode::Left => {
+                if app.calendar_focus == crate::app::CalendarFocus::Calendar {
+                    app.calendar_move_days(-1);
+                }
+                return Ok(false);
+            }
+            KeyCode::Right => {
+                if app.calendar_focus == crate::app::CalendarFocus::Calendar {
+                    app.calendar_move_days(1);
+                }
+                return Ok(false);
+            }
+            KeyCode::Enter | KeyCode::Char('o') => {
+                if app.calendar_focus == crate::app::CalendarFocus::Tweets {
+                    if let Some(tweet) = app.calendar_selected_tweet() {
+                        open_tweet_in_browser(&tweet.id)?;
+                    }
+                }
                 return Ok(false);
             }
             _ => {

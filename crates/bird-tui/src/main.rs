@@ -225,6 +225,15 @@ async fn run_app(
         match events::handle_events(app).await {
             Ok(true) => break, // User quit
             Ok(false) => {
+                if app.show_calendar
+                    && (app.calendar_needs_reload || app.calendar_needs_filter)
+                {
+                    if let Err(e) = data::load_calendar_tweets(app, &["likes", "bookmarks"]).await
+                    {
+                        app.set_error(e);
+                    }
+                }
+
                 // Check if we need to reload tweets (pagination changed)
                 if app.current_page != last_page {
                     if let Err(e) = data::load_page_tweets(app, &["likes", "bookmarks"]).await {

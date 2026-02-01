@@ -4,6 +4,7 @@ use crate::app::{App, TweetDisplayData};
 use bird_core::TweetWithCollections;
 use bird_storage::ResonanceScore;
 use chrono::{DateTime, Local};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 /// Load tweets for the current page and update app state.
@@ -56,6 +57,39 @@ pub async fn load_page_tweets(app: &mut App, collections: &[&str]) -> Result<(),
     Ok(())
 }
 
+/// Load tweets for calendar mode and apply the active range filter.
+pub async fn load_calendar_tweets(app: &mut App, collections: &[&str]) -> Result<(), String> {
+    if app.calendar_needs_reload {
+        app.loading = true;
+
+        let tweets_result = app
+            .storage
+            .get_tweets_interleaved(collections, &app.user_id, None, None)
+            .await
+            .map_err(|e| format!("Failed to fetch calendar tweets: {}", e))?;
+
+        let mut display_tweets = convert_tweets_to_display(app, tweets_result);
+        display_tweets.sort_by(|a, b| match (&a.created_at_local, &b.created_at_local) {
+            (Some(a_dt), Some(b_dt)) => b_dt.cmp(a_dt),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => a.id.cmp(&b.id),
+        });
+
+        app.calendar_all_tweets = display_tweets;
+        app.calendar_needs_reload = false;
+        app.calendar_needs_filter = true;
+        app.loading = false;
+    }
+
+    if app.calendar_needs_filter {
+        apply_calendar_filter(app);
+        app.calendar_needs_filter = false;
+    }
+
+    Ok(())
+}
+
 /// Helper function to convert raw tweets to display data.
 fn convert_tweets_to_display(
     app: &App,
@@ -84,7 +118,13 @@ fn convert_tweets_to_display(
                     });
 
             let collections_vec = tweet.collections.clone();
-            let created_at = tweet.tweet.created_at.as_ref().map(|s| format_timestamp(s));
+            let created_at_raw = tweet.tweet.created_at.as_deref();
+            let created_at_local = created_at_raw.and_then(parse_created_at);
+            let created_at = match (created_at_local.as_ref(), created_at_raw) {
+                (Some(parsed), _) => Some(format_timestamp_local(parsed)),
+                (None, Some(raw)) => Some(raw.to_string()),
+                (None, None) => None,
+            };
 
             // Count interactions with this author's tweets across all loaded tweets
             let (author_liked_count, author_quoted_count, author_retweeted_count) = author_id
@@ -102,6 +142,7 @@ fn convert_tweets_to_display(
                 collections: collections_vec,
                 resonance_score,
                 created_at,
+                created_at_local,
                 author_liked_count,
                 author_quoted_count,
                 author_retweeted_count,
@@ -236,27 +277,48 @@ fn truncate_text(text: &str, max_len: usize) -> String {
     }
 }
 
+/// Filter calendar tweets by the active range.
+fn apply_calendar_filter(app: &mut App) {
+    let Some((start, end)) = app.calendar_range_naive() else {
+        app.calendar_tweets.clear();
+        app.calendar_reset_selection();
+        return;
+    };
+
+    app.calendar_tweets = app
+        .calendar_all_tweets
+        .iter()
+        .filter(|tweet| {
+            let Some(dt) = tweet.created_at_local.as_ref() else {
+                return false;
+            };
+            let date = dt.date_naive();
+            date >= start && date <= end
+        })
+        .cloned()
+        .collect();
+
+    app.calendar_reset_selection();
+}
+
 /// Format a timestamp string into a more readable format with local timezone.
 /// Converts Twitter timestamp format (e.g., "Wed Jan 28 15:00:44 +0000 2026")
 /// to user's local timezone and formats as "Wed Jan 28 03:00pm".
-fn format_timestamp(ts_str: &str) -> String {
-    // Try to parse Twitter's format: "Wed Jan 28 15:00:44 +0000 2026"
-    // Format: "%a %b %d %H:%M:%S %z %Y"
-    match DateTime::parse_from_str(ts_str, "%a %b %d %H:%M:%S %z %Y") {
-        Ok(utc_time) => {
-            // Convert to local timezone
-            let local_time = utc_time.with_timezone(&Local);
-            // Format as "Wed Jan 28 03:00pm"
-            local_time
-                .format("%a %b %d %I:%M%p")
-                .to_string()
-                .to_lowercase()
-        }
-        Err(_) => {
-            // Fallback if parsing fails
-            ts_str.to_string()
-        }
+fn parse_created_at(ts_str: &str) -> Option<DateTime<Local>> {
+    if let Ok(rfc3339) = DateTime::parse_from_rfc3339(ts_str) {
+        return Some(rfc3339.with_timezone(&Local));
     }
+
+    if let Ok(twitter_time) = DateTime::parse_from_str(ts_str, "%a %b %d %H:%M:%S %z %Y") {
+        return Some(twitter_time.with_timezone(&Local));
+    }
+
+    None
+}
+
+/// Format a timestamp into a readable local string.
+fn format_timestamp_local(dt: &DateTime<Local>) -> String {
+    dt.format("%a %b %d %I:%M%p").to_string().to_lowercase()
 }
 
 #[cfg(test)]
@@ -272,7 +334,10 @@ mod tests {
     #[test]
     fn test_format_timestamp() {
         // Test parsing Twitter timestamp format and converting to local timezone
-        let result = format_timestamp("Wed Jan 28 15:00:44 +0000 2026");
+        let parsed = parse_created_at("Wed Jan 28 15:00:44 +0000 2026");
+        assert!(parsed.is_some(), "Should parse Twitter timestamp format");
+
+        let result = format_timestamp_local(&parsed.unwrap());
 
         // The output should be in the format "day mon dd hh:mmp" with lowercase am/pm
         // Since we converted from UTC+0 to local, the exact time depends on the system timezone

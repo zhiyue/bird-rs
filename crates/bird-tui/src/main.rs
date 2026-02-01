@@ -218,6 +218,9 @@ async fn run_app(
         // Increment frame counter for animations
         app.frame = app.frame.wrapping_add(1);
 
+        // Apply debounced search filter (checks timer internally)
+        app.update_search();
+
         // Handle events
         match events::handle_events(app).await {
             Ok(true) => break, // User quit

@@ -5,6 +5,7 @@ use ratatui::style::Color;
 use ratatui::widgets::TableState;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Instant, Duration};
 
 /// Collection membership information for a tweet.
 #[derive(Debug, Clone)]
@@ -150,6 +151,12 @@ pub struct App {
 
     /// Filtered tweet indices based on search query.
     pub filtered_indices: Vec<usize>,
+
+    /// Last time search input was modified (for debouncing).
+    pub search_input_time: Instant,
+
+    /// Last search query that was processed (for result caching).
+    pub last_processed_search: String,
 }
 
 impl App {
@@ -177,6 +184,8 @@ impl App {
             show_search: false,
             search_query: String::new(),
             filtered_indices: Vec::new(),
+            search_input_time: Instant::now(),
+            last_processed_search: String::new(),
         }
     }
 
@@ -251,9 +260,29 @@ impl App {
         self.update_search();
     }
 
-    /// Update search results based on current query.
+    /// Mark search input as modified (for debouncing).
+    pub fn mark_search_modified(&mut self) {
+        self.search_input_time = Instant::now();
+    }
+
+    /// Check if enough time has passed to apply search filter (debounced).
+    pub fn should_apply_search(&self) -> bool {
+        self.search_input_time.elapsed() >= Duration::from_millis(100)
+    }
+
+    /// Update search results based on current query (with debouncing and caching).
     pub fn update_search(&mut self) {
+        // Skip if search hasn't stabilized (debouncing)
+        if !self.should_apply_search() {
+            return;
+        }
+
         let query = self.search_query.to_lowercase();
+
+        // Skip if query hasn't changed (caching)
+        if query == self.last_processed_search {
+            return;
+        }
 
         if query.is_empty() {
             // Show all tweets if search is empty
@@ -276,6 +305,9 @@ impl App {
                 .map(|(i, _)| i)
                 .collect();
         }
+
+        // Cache the processed query
+        self.last_processed_search = query;
 
         // Reset selection to first result
         self.table_state.select(Some(0));

@@ -49,12 +49,12 @@ fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<bool, String> {
             }
             KeyCode::Backspace => {
                 app.search_query.pop();
-                app.update_search();
+                app.mark_search_modified();
                 return Ok(false);
             }
             KeyCode::Char(c) => {
                 app.search_query.push(c);
-                app.update_search();
+                app.mark_search_modified();
                 return Ok(false);
             }
             _ => {

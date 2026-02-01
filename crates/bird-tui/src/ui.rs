@@ -190,6 +190,19 @@ fn render_right_panel(f: &mut Frame, app: &App, area: Rect) {
             )),
         ]));
 
+        // Author interaction stats line
+        if tweet.author_liked_count > 0 || tweet.author_quoted_count > 0 || tweet.author_retweeted_count > 0 {
+            let author_with_padding = " ".repeat(label_width.saturating_sub("Engagement:".len()));
+            metadata.push(Line::from(vec![
+                Span::styled("Engagement:", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(author_with_padding),
+                Span::raw(format!(
+                    "❤ {} liked  💬 {} quoted  🔄 {} retweeted",
+                    tweet.author_liked_count, tweet.author_quoted_count, tweet.author_retweeted_count
+                )),
+            ]));
+        }
+
         // Created line
         let created_padding = " ".repeat(label_width.saturating_sub("Created:".len()));
         metadata.push(Line::from(vec![
@@ -228,7 +241,10 @@ fn render_right_panel(f: &mut Frame, app: &App, area: Rect) {
         // Interactions line
         let interactions_padding = " ".repeat(label_width.saturating_sub("Interactions:".len()));
         metadata.push(Line::from(vec![
-            Span::styled("Interactions:", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Interactions:",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::raw(interactions_padding),
             Span::raw(format!(
                 "↩ {}  💬 {}  🔄 {}",

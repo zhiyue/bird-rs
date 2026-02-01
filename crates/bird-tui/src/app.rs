@@ -5,7 +5,7 @@ use ratatui::style::Color;
 use ratatui::widgets::TableState;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Instant, Duration};
+use std::time::{Duration, Instant};
 
 /// Collection membership information for a tweet.
 #[derive(Debug, Clone)]
@@ -21,10 +21,15 @@ pub struct TweetDisplayData {
     pub text: String,
     pub author_username: String,
     pub author_name: String,
+    pub author_id: Option<String>,
     pub headline: String,
     pub collections: Vec<String>,
     pub resonance_score: ResonanceScore,
     pub created_at: Option<String>,
+    /// Your interaction stats with this author's tweets
+    pub author_liked_count: u32,
+    pub author_quoted_count: u32,
+    pub author_retweeted_count: u32,
 }
 
 /// Which panel is currently focused.

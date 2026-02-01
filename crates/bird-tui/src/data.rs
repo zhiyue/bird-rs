@@ -65,6 +65,7 @@ fn convert_tweets_to_display(
         .into_iter()
         .map(|tweet| {
             let tweet_id = tweet.tweet.id.clone();
+            let author_id = tweet.tweet.author_id.clone();
 
             let resonance_score =
                 app.resonance_scores
@@ -85,18 +86,50 @@ fn convert_tweets_to_display(
             let collections_vec = tweet.collections.clone();
             let created_at = tweet.tweet.created_at.as_ref().map(|s| format_timestamp(s));
 
+            // Count interactions with this author's tweets across all loaded tweets
+            let (author_liked_count, author_quoted_count, author_retweeted_count) = author_id
+                .as_ref()
+                .map(|author_id| count_author_interactions(app, author_id))
+                .unwrap_or((0, 0, 0));
+
             TweetDisplayData {
                 id: tweet_id,
                 text: tweet.tweet.text.clone(),
                 author_username: tweet.tweet.author.username.clone(),
                 author_name: tweet.tweet.author.name.clone(),
+                author_id,
                 headline: truncate_text(&tweet.tweet.text, 50),
                 collections: collections_vec,
                 resonance_score,
                 created_at,
+                author_liked_count,
+                author_quoted_count,
+                author_retweeted_count,
             }
         })
         .collect()
+}
+
+/// Count how many of an author's tweets are in each collection.
+fn count_author_interactions(app: &App, author_id: &str) -> (u32, u32, u32) {
+    let mut liked = 0u32;
+    let mut quoted = 0u32;
+    let mut retweeted = 0u32;
+
+    for tweet in &app.tweets {
+        if tweet.author_id.as_deref() == Some(author_id) {
+            for collection in &tweet.collections {
+                match collection.as_str() {
+                    "likes" => liked += 1,
+                    "quote_tweets" => quoted += 1,
+                    "retweets" => retweeted += 1,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    (liked, quoted, retweeted)
 }
 
 /// Preload adjacent pages (±2 pages) for faster pagination.

@@ -446,17 +446,13 @@ fn render_search_modal(f: &mut Frame, app: &App) {
     // Show search query with cursor
     let cursor = "█";
     let input_text = format!("{}{}", app.search_query, cursor);
-    let search_text = Paragraph::new(input_text)
-        .style(Style::default().fg(app.theme.primary));
+    let search_text = Paragraph::new(input_text).style(Style::default().fg(app.theme.primary));
 
     f.render_widget(search_text, inner);
 
     // Show search results count below
     let results_count = if app.show_search {
-        format!(
-            "Results: {} tweet(s)",
-            app.filtered_indices.len()
-        )
+        format!("Results: {} tweet(s)", app.filtered_indices.len())
     } else {
         "".to_string()
     };
@@ -469,8 +465,7 @@ fn render_search_modal(f: &mut Frame, app: &App) {
     };
 
     if !results_count.is_empty() {
-        let results_widget = Paragraph::new(results_count)
-            .style(Style::default().fg(Color::Gray));
+        let results_widget = Paragraph::new(results_count).style(Style::default().fg(Color::Gray));
         f.render_widget(results_widget, results_rect);
     }
 }
@@ -489,21 +484,49 @@ fn collection_emoji(collections: &[String]) -> String {
     result
 }
 
-/// Truncate tweet ID to a maximum length.
+/// Truncate tweet ID to a maximum length, ensuring UTF-8 safety.
 fn truncate_id(id: &str, max_len: usize) -> String {
-    if id.len() <= max_len {
-        id.to_string()
+    let mut result = String::new();
+    let mut byte_count = 0;
+    let limit = max_len.saturating_sub(1);
+
+    for ch in id.chars() {
+        let ch_len = ch.len_utf8();
+        if byte_count + ch_len > limit {
+            result.push('…');
+            break;
+        }
+        result.push(ch);
+        byte_count += ch_len;
+    }
+
+    if result.is_empty() && !id.is_empty() {
+        String::from("…")
     } else {
-        format!("{}…", &id[..max_len - 1])
+        result
     }
 }
 
-/// Truncate text to a maximum length, adding ellipsis if needed.
+/// Truncate text to a maximum length, adding ellipsis if needed. UTF-8 safe.
 fn truncate_text(text: &str, max_len: usize) -> String {
-    if text.len() <= max_len {
-        text.to_string()
+    let mut result = String::new();
+    let mut byte_count = 0;
+    let limit = max_len.saturating_sub(1);
+
+    for ch in text.chars() {
+        let ch_len = ch.len_utf8();
+        if byte_count + ch_len > limit {
+            result.push('…');
+            break;
+        }
+        result.push(ch);
+        byte_count += ch_len;
+    }
+
+    if result.is_empty() && !text.is_empty() {
+        String::from("…")
     } else {
-        format!("{}…", &text[..max_len - 1])
+        result
     }
 }
 

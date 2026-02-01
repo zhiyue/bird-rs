@@ -156,7 +156,10 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
             (1, filtered_total)
         };
         (
-            format!(" Filtered Tweets (Showing {}-{} of {}) ", start, end, filtered_total),
+            format!(
+                " Filtered Tweets (Showing {}-{} of {}) ",
+                start, end, filtered_total
+            ),
             ratatui::widgets::BorderType::Double,
             Style::default().fg(app.theme.primary),
         )
@@ -170,13 +173,13 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
         let page_end = if total == 0 {
             0
         } else {
-            min(
-                (app.current_page as u64 + 1) * app.page_size as u64,
-                total,
-            )
+            min((app.current_page as u64 + 1) * app.page_size as u64, total)
         };
         (
-            format!(" Tweets (Showing {}-{} of {}) ", page_start, page_end, total),
+            format!(
+                " Tweets (Showing {}-{} of {}) ",
+                page_start, page_end, total
+            ),
             ratatui::widgets::BorderType::Rounded,
             Style::default().fg(app.theme.border),
         )
@@ -185,8 +188,10 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
     // Create table with header
     let table = Table::new(rows, widths)
         .header(
-            Row::new(vec!["Time", "Author", "Likes", "RTs", "Replies", "Headline"])
-                .style(Style::default().add_modifier(Modifier::BOLD)),
+            Row::new(vec![
+                "Time", "Author", "Likes", "RTs", "Replies", "Headline",
+            ])
+            .style(Style::default().add_modifier(Modifier::BOLD)),
         )
         .block(
             Block::default()

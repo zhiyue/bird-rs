@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap},
     Frame,
 };
 
@@ -57,24 +57,28 @@ pub fn render(f: &mut Frame, app: &App) {
     render_status_bar(f, app, main_chunks[1]);
 }
 
-/// Render the left panel with tweet list (multi-column).
+/// Render the left panel with tweet list (table with columns).
 fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
-    let items: Vec<ListItem> = app
+    // Define column constraints: ID | Author | Score | Headline | Collections
+    let widths = [
+        Constraint::Length(8),   // ID
+        Constraint::Length(14),  // Author
+        Constraint::Length(5),   // Score
+        Constraint::Length(30),  // Headline
+        Constraint::Fill(1),     // Collections (takes remaining space)
+    ];
+
+    // Build table rows
+    let rows: Vec<Row> = app
         .tweets
         .iter()
         .enumerate()
         .map(|(i, tweet)| {
-            let emoji = collection_emoji(&tweet.collections);
             let id_display = truncate_id(&tweet.id, 8);
             let author_display = truncate_text(&tweet.author_username, 14);
             let score_display = format!("{:.1}", tweet.resonance_score.total);
             let headline = truncate_text(&tweet.headline, 30);
-
-            // Multi-column layout: ID | Author | Score | Headline | Collections
-            let content = format!(
-                "{:8} | {:14} | {:5} | {:30} {}",
-                id_display, author_display, score_display, headline, emoji
-            );
+            let emoji = collection_emoji(&tweet.collections);
 
             let style = if i == app.selected_index {
                 Style::default()
@@ -85,28 +89,43 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
                 Style::default()
             };
 
-            ListItem::new(content).style(style)
+            Row::new(vec![
+                Cell::from(id_display),
+                Cell::from(author_display),
+                Cell::from(score_display),
+                Cell::from(headline),
+                Cell::from(emoji),
+            ])
+            .style(style)
         })
         .collect();
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .title(format!(
-                    " Tweets (Page {}/{}) ",
-                    app.current_page + 1,
-                    (app.total_count as u32).div_ceil(app.page_size)
-                ))
-                .borders(Borders::ALL)
-                .border_type(ratatui::widgets::BorderType::Rounded),
-        )
-        .style(if app.focus == Focus::List {
-            Style::default().fg(Color::Green)
-        } else {
-            Style::default()
-        });
+    // Create table with header
+    let table = Table::new(
+        rows,
+        widths,
+    )
+    .header(
+        Row::new(vec!["ID", "Author", "Score", "Headline", "Collections"])
+            .style(Style::default().add_modifier(Modifier::BOLD))
+    )
+    .block(
+        Block::default()
+            .title(format!(
+                " Tweets (Page {}/{}) ",
+                app.current_page + 1,
+                (app.total_count as u32).div_ceil(app.page_size)
+            ))
+            .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded),
+    )
+    .style(if app.focus == Focus::List {
+        Style::default().fg(Color::Green)
+    } else {
+        Style::default()
+    });
 
-    f.render_widget(list, area);
+    f.render_widget(table, area);
 }
 
 /// Render the right panel with tweet details.

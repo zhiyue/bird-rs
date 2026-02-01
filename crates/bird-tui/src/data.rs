@@ -3,6 +3,7 @@
 use crate::app::{App, TweetDisplayData};
 use bird_core::TweetWithCollections;
 use bird_storage::ResonanceScore;
+use chrono::{DateTime, Local};
 use std::collections::HashMap;
 
 /// Load tweets for the current page and update app state.
@@ -40,7 +41,8 @@ pub async fn load_page_tweets(app: &mut App, collections: &[&str]) -> Result<(),
     let display_tweets = convert_tweets_to_display(app, tweets_result);
 
     // Cache current page
-    app.page_cache.insert(app.current_page, display_tweets.clone());
+    app.page_cache
+        .insert(app.current_page, display_tweets.clone());
     app.tweets = display_tweets;
     app.selected_index = 0;
     app.detail_scroll_offset = 0;
@@ -188,10 +190,24 @@ fn truncate_text(text: &str, max_len: usize) -> String {
     }
 }
 
-/// Format a timestamp string into a more readable format.
+/// Format a timestamp string into a more readable format with local timezone.
+/// Converts Twitter timestamp format (e.g., "Wed Jan 28 15:00:44 +0000 2026")
+/// to user's local timezone and formats as "Wed Jan 28 03:00pm".
 fn format_timestamp(ts_str: &str) -> String {
-    // Try to parse and format, but fallback to original if parsing fails
-    ts_str.to_string()
+    // Try to parse Twitter's format: "Wed Jan 28 15:00:44 +0000 2026"
+    // Format: "%a %b %d %H:%M:%S %z %Y"
+    match DateTime::parse_from_str(ts_str, "%a %b %d %H:%M:%S %z %Y") {
+        Ok(utc_time) => {
+            // Convert to local timezone
+            let local_time = utc_time.with_timezone(&Local);
+            // Format as "Wed Jan 28 03:00pm"
+            local_time.format("%a %b %d %I:%M%p").to_string().to_lowercase()
+        }
+        Err(_) => {
+            // Fallback if parsing fails
+            ts_str.to_string()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -202,5 +218,23 @@ mod tests {
     fn test_truncate_text() {
         assert_eq!(truncate_text("hello", 10), "hello");
         assert_eq!(truncate_text("hello world", 8), "hello w…");
+    }
+
+    #[test]
+    fn test_format_timestamp() {
+        // Test parsing Twitter timestamp format and converting to local timezone
+        let result = format_timestamp("Wed Jan 28 15:00:44 +0000 2026");
+
+        // The output should be in the format "day mon dd hh:mmp" with lowercase am/pm
+        // Since we converted from UTC+0 to local, the exact time depends on the system timezone
+        // But it should have the pattern we expect (containing day, month abbreviation, and am/pm)
+        let result_lower = result.to_lowercase();
+        assert!(!result.is_empty(), "Timestamp should not be empty");
+        assert!(result_lower.contains("28"), "Should contain day of month");
+        assert!(
+            result_lower.contains("am") || result_lower.contains("pm"),
+            "Should contain am or pm, got: {}",
+            result
+        );
     }
 }

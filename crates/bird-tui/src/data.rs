@@ -105,11 +105,7 @@ fn convert_tweets_to_display(
             let bookmarked = tweet.collections.iter().any(|c| c == "bookmarks");
             let reply_count = app.reply_count_map.get(&tweet_id).copied().unwrap_or(0);
             let quote_count = app.quote_count_map.get(&tweet_id).copied().unwrap_or(0);
-            let retweet_count = app
-                .retweet_count_map
-                .get(&tweet_id)
-                .copied()
-                .unwrap_or(0);
+            let retweet_count = app.retweet_count_map.get(&tweet_id).copied().unwrap_or(0);
             let resonance_score = ResonanceScore::new(
                 tweet_id.clone(),
                 app.user_id.clone(),
@@ -216,11 +212,7 @@ pub async fn compute_resonance_scores(app: &mut App) -> Result<(), String> {
     app.loading = true;
 
     // Batch fetch all interaction pairs
-    let reply_pairs = match app
-        .storage
-        .get_user_reply_tweets(&app.user_id, None)
-        .await
-    {
+    let reply_pairs = match app.storage.get_user_reply_tweets(&app.user_id, None).await {
         Ok(pairs) => pairs,
         Err(e) => {
             app.loading = false;
@@ -228,11 +220,7 @@ pub async fn compute_resonance_scores(app: &mut App) -> Result<(), String> {
         }
     };
 
-    let quote_pairs = match app
-        .storage
-        .get_user_quote_tweets(&app.user_id, None)
-        .await
-    {
+    let quote_pairs = match app.storage.get_user_quote_tweets(&app.user_id, None).await {
         Ok(pairs) => pairs,
         Err(e) => {
             app.loading = false;
@@ -240,11 +228,7 @@ pub async fn compute_resonance_scores(app: &mut App) -> Result<(), String> {
         }
     };
 
-    let retweet_pairs = match app
-        .storage
-        .get_user_retweets(&app.user_id, None)
-        .await
-    {
+    let retweet_pairs = match app.storage.get_user_retweets(&app.user_id, None).await {
         Ok(pairs) => pairs,
         Err(e) => {
             app.loading = false;

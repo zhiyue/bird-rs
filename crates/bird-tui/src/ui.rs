@@ -304,7 +304,11 @@ fn render_right_panel(f: &mut Frame, app: &App, area: Rect) {
         // Activity line
         let activity_padding = " ".repeat(label_width.saturating_sub("Activity:".len()));
         let liked = if tweet.resonance_score.liked { 1 } else { 0 };
-        let bookmarked = if tweet.resonance_score.bookmarked { 1 } else { 0 };
+        let bookmarked = if tweet.resonance_score.bookmarked {
+            1
+        } else {
+            0
+        };
         metadata.push(Line::from(vec![
             Span::styled("Activity:", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(activity_padding),

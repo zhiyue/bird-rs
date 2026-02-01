@@ -175,88 +175,82 @@ fn render_right_panel(f: &mut Frame, app: &App, area: Rect) {
             .constraints([Constraint::Length(8), Constraint::Min(10)])
             .split(area);
 
-        // Metadata section - enhanced with more details
-        let mut metadata = vec![
-            Line::from(vec![
-                Span::styled("Author: ", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(format!(
-                    "@{} ({})",
-                    tweet.author_username, tweet.author_name
-                )),
-            ]),
-            Line::from(vec![
-                Span::styled("Created: ", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(
-                    tweet
-                        .created_at
-                        .as_ref()
-                        .cloned()
-                        .unwrap_or_else(|| "—".to_string()),
-                ),
-            ]),
-        ];
+        // Metadata section - aligned columns with fixed label width
+        let mut metadata = vec![];
+        let label_width: usize = 15;
 
-        // Discovered in collections
+        // Author line
+        let author_padding = " ".repeat(label_width.saturating_sub("Author:".len()));
+        metadata.push(Line::from(vec![
+            Span::styled("Author:", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(author_padding),
+            Span::raw(format!(
+                "@{} ({})",
+                tweet.author_username, tweet.author_name
+            )),
+        ]));
+
+        // Created line
+        let created_padding = " ".repeat(label_width.saturating_sub("Created:".len()));
+        metadata.push(Line::from(vec![
+            Span::styled("Created:", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(created_padding),
+            Span::raw(
+                tweet
+                    .created_at
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
+        ]));
+
+        // Collections line
         if !tweet.collections.is_empty() {
-            let mut collection_line = vec![Span::styled(
-                "Discovered: ",
-                Style::default().add_modifier(Modifier::BOLD),
-            )];
-
-            for collection in &tweet.collections {
-                let emoji = match collection.as_str() {
+            let collections_str = tweet
+                .collections
+                .iter()
+                .map(|c| match c.as_str() {
                     "likes" => "❤  Liked",
                     "bookmarks" => "🔖  Bookmarked",
                     "user_tweets" => "📝  Your tweet",
                     _ => "•",
-                };
-                collection_line.push(Span::raw(format!("{}   ", emoji)));
-            }
-            metadata.push(Line::from(collection_line));
+                })
+                .collect::<Vec<_>>()
+                .join("   ");
+            let discovered_padding = " ".repeat(label_width.saturating_sub("Discovered:".len()));
+            metadata.push(Line::from(vec![
+                Span::styled("Discovered:", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(discovered_padding),
+                Span::raw(collections_str),
+            ]));
         }
 
-        // Interactions - show what this tweet triggered
-        let interactions_line = vec![
-            Span::styled(
-                "Interactions: ",
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
+        // Interactions line
+        let interactions_padding = " ".repeat(label_width.saturating_sub("Interactions:".len()));
+        metadata.push(Line::from(vec![
+            Span::styled("Interactions:", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(interactions_padding),
             Span::raw(format!(
-                "↩  {}   💬  {}   🔄  {} ",
+                "↩ {}  💬 {}  🔄 {}",
                 tweet.resonance_score.reply_count,
                 tweet.resonance_score.quote_count,
                 tweet.resonance_score.retweet_count
             )),
-        ];
-        metadata.push(Line::from(interactions_line));
+        ]));
 
-        // Resonance score breakdown
-        let score_line = vec![
-            Span::styled("Resonance: ", Style::default().add_modifier(Modifier::BOLD)),
+        // Resonance line with color
+        let resonance_padding = " ".repeat(label_width.saturating_sub("Resonance:".len()));
+        let resonance_value = format!("{:.1}", tweet.resonance_score.total);
+        metadata.push(Line::from(vec![
+            Span::styled("Resonance:", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(resonance_padding),
             Span::styled(
-                format!("{:.1}", tweet.resonance_score.total),
+                resonance_value,
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::raw(format!(
-                "  |  ❤ {:.2}  ↩ {:.2}  💬 {:.2}  🔄 {:.2}  📌 {:.2}",
-                if tweet.resonance_score.liked {
-                    0.25
-                } else {
-                    0.0
-                },
-                (tweet.resonance_score.reply_count as f64) * 0.5,
-                (tweet.resonance_score.quote_count as f64) * 0.75,
-                (tweet.resonance_score.retweet_count as f64) * 0.5,
-                if tweet.resonance_score.bookmarked {
-                    0.5
-                } else {
-                    0.0
-                }
-            )),
-        ];
-        metadata.push(Line::from(score_line));
+        ]));
 
         metadata.push(Line::from("")); // Spacing
 
@@ -381,12 +375,15 @@ fn render_help(f: &mut Frame, _app: &App) {
                 .fg(Color::Yellow),
         )),
         Line::from(""),
-        Line::from("↑/↓      Navigate list"),
-        Line::from("←/→      Previous/Next page"),
-        Line::from("Tab      Switch focus (list ↔ detail)"),
-        Line::from("PgUp/PgDn  Scroll detail"),
-        Line::from("Ctrl+?   Toggle help"),
-        Line::from("q/Esc    Quit"),
+        Line::from("↑/↓        Navigate list"),
+        Line::from("←/→        Previous/Next page"),
+        Line::from("Tab        Switch focus (list ↔ detail)"),
+        Line::from("PgUp/PgDn  Scroll detail panel"),
+        Line::from("o          Open tweet in browser"),
+        Line::from("Ctrl+F     Search tweets"),
+        Line::from("Ctrl+T     Toggle dark/light theme"),
+        Line::from("Ctrl+?     Toggle help"),
+        Line::from("q/Esc      Quit"),
         Line::from(""),
         Line::from(Span::styled(
             "Press Ctrl+? or Esc to close",

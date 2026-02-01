@@ -133,8 +133,47 @@ fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<bool, String> {
             Ok(false)
         }
 
+        // Open tweet in browser
+        KeyCode::Char('o') => {
+            if let Some(tweet) = app.selected_tweet() {
+                open_tweet_in_browser(&tweet.id)?;
+            }
+            Ok(false)
+        }
+
         _ => Ok(false),
     }
+}
+
+/// Open a tweet in the default web browser.
+fn open_tweet_in_browser(tweet_id: &str) -> Result<(), String> {
+    let url = format!("https://twitter.com/i/web/status/{}", tweet_id);
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("Failed to open tweet: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("Failed to open tweet: {}", e))?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(&["/C", "start", &url])
+            .spawn()
+            .map_err(|e| format!("Failed to open tweet: {}", e))?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

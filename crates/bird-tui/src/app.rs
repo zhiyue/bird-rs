@@ -141,6 +141,15 @@ pub struct App {
 
     /// Current color theme.
     pub theme: Theme,
+
+    /// Whether search modal is shown.
+    pub show_search: bool,
+
+    /// Search input query string.
+    pub search_query: String,
+
+    /// Filtered tweet indices based on search query.
+    pub filtered_indices: Vec<usize>,
 }
 
 impl App {
@@ -165,6 +174,9 @@ impl App {
             list_scroll_pos: 0,
             frame: 0,
             theme: Theme::dark(),
+            show_search: false,
+            search_query: String::new(),
+            filtered_indices: Vec::new(),
         }
     }
 
@@ -228,5 +240,60 @@ impl App {
     /// Clear the error message.
     pub fn clear_error(&mut self) {
         self.error = None;
+    }
+
+    /// Toggle search modal.
+    pub fn toggle_search(&mut self) {
+        self.show_search = !self.show_search;
+        if !self.show_search {
+            self.search_query.clear();
+        }
+        self.update_search();
+    }
+
+    /// Update search results based on current query.
+    pub fn update_search(&mut self) {
+        let query = self.search_query.to_lowercase();
+
+        if query.is_empty() {
+            // Show all tweets if search is empty
+            self.filtered_indices = (0..self.tweets.len()).collect();
+        } else {
+            // Filter tweets by text content, author, or headline
+            self.filtered_indices = self
+                .tweets
+                .iter()
+                .enumerate()
+                .filter(|(_, tweet)| {
+                    let text_lower = tweet.text.to_lowercase();
+                    let author_lower = tweet.author_username.to_lowercase();
+                    let headline_lower = tweet.headline.to_lowercase();
+
+                    text_lower.contains(&query)
+                        || author_lower.contains(&query)
+                        || headline_lower.contains(&query)
+                })
+                .map(|(i, _)| i)
+                .collect();
+        }
+
+        // Reset selection to first result
+        self.table_state.select(Some(0));
+    }
+
+    /// Get tweets to display (filtered if search is active).
+    pub fn display_tweets(&self) -> Vec<&TweetDisplayData> {
+        if self.show_search && !self.filtered_indices.is_empty() {
+            self.filtered_indices
+                .iter()
+                .filter_map(|&i| self.tweets.get(i))
+                .collect()
+        } else if self.show_search {
+            // Show empty results if search is active but no matches
+            Vec::new()
+        } else {
+            // Show all tweets
+            self.tweets.iter().collect()
+        }
     }
 }

@@ -6,8 +6,8 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Cell, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState,
-        Table, Wrap,
+        Block, Borders, Cell, Clear, Paragraph, Row, Scrollbar, ScrollbarOrientation,
+        ScrollbarState, Table, Wrap,
     },
     Frame,
 };
@@ -24,6 +24,12 @@ pub fn render(f: &mut Frame, app: &App) {
     if app.show_help {
         render_help(f, app);
         return;
+    }
+
+    // If search is shown, show search modal
+    if app.show_search {
+        render_search_modal(f, app);
+        // Still render main content behind the modal
     }
 
     // If error, show error
@@ -84,9 +90,12 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
         Constraint::Fill(1),    // Collections (takes remaining space)
     ];
 
-    // Build table rows
-    let rows: Vec<Row> = app
-        .tweets
+    // Get tweets to display (filtered or all)
+    let display_tweets = app.display_tweets();
+    let selected_index = app.selected_index();
+
+    // Build table rows from filtered tweets
+    let rows: Vec<Row> = display_tweets
         .iter()
         .enumerate()
         .map(|(i, tweet)| {
@@ -96,7 +105,7 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
             let headline = truncate_text(&tweet.headline, 30);
             let emoji = collection_emoji(&tweet.collections);
 
-            let style = if i == app.selected_index() {
+            let style = if i == selected_index {
                 Style::default()
                     .bg(app.theme.highlight)
                     .fg(app.theme.text)
@@ -142,9 +151,9 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(table, table_area);
 
     // Render scrollbar
-    if !app.tweets.is_empty() {
+    if !display_tweets.is_empty() {
         let mut scrollbar_state =
-            ScrollbarState::new(app.tweets.len()).position(app.selected_index());
+            ScrollbarState::new(display_tweets.len()).position(selected_index);
 
         f.render_stateful_widget(
             Scrollbar::default()
@@ -396,6 +405,76 @@ fn render_help(f: &mut Frame, _app: &App) {
     f.render_widget(help_widget, inner);
 }
 
+/// Render search modal.
+fn render_search_modal(f: &mut Frame, app: &App) {
+    let size = f.area();
+
+    // Create a centered modal
+    let modal_width = 60;
+    let modal_height = 6;
+    let x = (size.width.saturating_sub(modal_width)) / 2;
+    let y = (size.height.saturating_sub(modal_height)) / 2;
+
+    let modal_area = Rect {
+        x,
+        y,
+        width: modal_width,
+        height: modal_height,
+    };
+
+    // Clear background
+    f.render_widget(Clear, modal_area);
+
+    // Background block
+    f.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .title(" Search Tweets (Esc to close) ")
+            .style(Style::default().fg(app.theme.text)),
+        modal_area,
+    );
+
+    // Input area
+    let inner = Rect {
+        x: modal_area.x + 1,
+        y: modal_area.y + 1,
+        width: modal_area.width.saturating_sub(2),
+        height: modal_area.height.saturating_sub(2),
+    };
+
+    // Show search query with cursor
+    let cursor = "█";
+    let input_text = format!("{}{}", app.search_query, cursor);
+    let search_text = Paragraph::new(input_text)
+        .style(Style::default().fg(app.theme.primary));
+
+    f.render_widget(search_text, inner);
+
+    // Show search results count below
+    let results_count = if app.show_search {
+        format!(
+            "Results: {} tweet(s)",
+            app.filtered_indices.len()
+        )
+    } else {
+        "".to_string()
+    };
+
+    let results_rect = Rect {
+        x: modal_area.x + 1,
+        y: modal_area.y + 3,
+        width: modal_area.width.saturating_sub(2),
+        height: 1,
+    };
+
+    if !results_count.is_empty() {
+        let results_widget = Paragraph::new(results_count)
+            .style(Style::default().fg(Color::Gray));
+        f.render_widget(results_widget, results_rect);
+    }
+}
+
 /// Get collection emoji representation.
 fn collection_emoji(collections: &[String]) -> String {
     let mut result = String::new();
@@ -435,8 +514,8 @@ fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
         Span::raw(" Navigate  "),
         Span::styled("←→", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" Page  "),
-        Span::styled("Tab", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" Focus  "),
+        Span::styled("Ctrl+F", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" Search  "),
         Span::styled("Ctrl+T", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" Theme  "),
         Span::styled("Ctrl+?", Style::default().add_modifier(Modifier::BOLD)),

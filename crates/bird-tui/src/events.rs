@@ -36,6 +36,33 @@ fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<bool, String> {
         return Ok(false);
     }
 
+    // If search is shown, handle search input
+    if app.show_search {
+        match key.code {
+            KeyCode::Esc => {
+                app.toggle_search();
+                return Ok(false);
+            }
+            KeyCode::Enter => {
+                // Confirm search (keep modal open for more typing)
+                return Ok(false);
+            }
+            KeyCode::Backspace => {
+                app.search_query.pop();
+                app.update_search();
+                return Ok(false);
+            }
+            KeyCode::Char(c) => {
+                app.search_query.push(c);
+                app.update_search();
+                return Ok(false);
+            }
+            _ => {
+                return Ok(false);
+            }
+        }
+    }
+
     // Handle regular navigation
     match key.code {
         // Quit
@@ -50,6 +77,12 @@ fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<bool, String> {
         // Theme toggle
         KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.theme.toggle();
+            Ok(false)
+        }
+
+        // Search toggle
+        KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.toggle_search();
             Ok(false)
         }
 

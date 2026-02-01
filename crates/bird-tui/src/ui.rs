@@ -96,7 +96,7 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
             let headline = truncate_text(&tweet.headline, 30);
             let emoji = collection_emoji(&tweet.collections);
 
-            let style = if i == app.selected_index {
+            let style = if i == app.selected_index() {
                 Style::default()
                     .bg(app.theme.highlight)
                     .fg(app.theme.text)
@@ -144,7 +144,7 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
     // Render scrollbar
     if !app.tweets.is_empty() {
         let mut scrollbar_state =
-            ScrollbarState::new(app.tweets.len()).position(app.selected_index);
+            ScrollbarState::new(app.tweets.len()).position(app.selected_index());
 
         f.render_stateful_widget(
             Scrollbar::default()

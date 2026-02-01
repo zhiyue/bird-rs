@@ -14,7 +14,7 @@ pub async fn load_page_tweets(app: &mut App, collections: &[&str]) -> Result<(),
     // Check if current page is cached
     if let Some(cached_tweets) = app.page_cache.get(&app.current_page).cloned() {
         app.tweets = cached_tweets;
-        app.selected_index = 0;
+        app.table_state.select(Some(0));
         app.detail_scroll_offset = 0;
         app.loading = false;
 
@@ -44,7 +44,7 @@ pub async fn load_page_tweets(app: &mut App, collections: &[&str]) -> Result<(),
     app.page_cache
         .insert(app.current_page, display_tweets.clone());
     app.tweets = display_tweets;
-    app.selected_index = 0;
+    app.table_state.select(Some(0));
     app.detail_scroll_offset = 0;
 
     app.loading = false;
@@ -201,7 +201,10 @@ fn format_timestamp(ts_str: &str) -> String {
             // Convert to local timezone
             let local_time = utc_time.with_timezone(&Local);
             // Format as "Wed Jan 28 03:00pm"
-            local_time.format("%a %b %d %I:%M%p").to_string().to_lowercase()
+            local_time
+                .format("%a %b %d %I:%M%p")
+                .to_string()
+                .to_lowercase()
         }
         Err(_) => {
             // Fallback if parsing fails

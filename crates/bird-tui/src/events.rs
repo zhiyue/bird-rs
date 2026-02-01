@@ -67,7 +67,7 @@ fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<bool, String> {
         KeyCode::Left => {
             if app.current_page > 0 {
                 app.current_page -= 1;
-                app.selected_index = 0;
+                app.table_state.select(Some(0));
                 app.detail_scroll_offset = 0;
                 // TODO: reload tweets for this page
             }
@@ -76,7 +76,7 @@ fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<bool, String> {
         KeyCode::Right => {
             // TODO: check if there are more pages
             app.current_page += 1;
-            app.selected_index = 0;
+            app.table_state.select(Some(0));
             app.detail_scroll_offset = 0;
             // TODO: reload tweets for this page
             Ok(false)
@@ -144,10 +144,10 @@ mod tests {
     #[test]
     fn test_list_navigation() {
         let mut app = create_test_app();
-        assert_eq!(app.selected_index, 0);
+        assert_eq!(app.selected_index(), 0);
         let key_down = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
         let _ = handle_key_event(&mut app, key_down);
         // With empty tweets, index shouldn't change
-        assert_eq!(app.selected_index, 0);
+        assert_eq!(app.selected_index(), 0);
     }
 }

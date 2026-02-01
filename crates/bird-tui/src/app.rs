@@ -2,6 +2,7 @@
 
 use bird_storage::{ResonanceScore, Storage};
 use ratatui::style::Color;
+use ratatui::widgets::TableState;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -99,8 +100,8 @@ pub struct App {
     /// Resonance scores for all tweets in database.
     pub resonance_scores: HashMap<String, ResonanceScore>,
 
-    /// Currently selected tweet index in the list.
-    pub selected_index: usize,
+    /// Table state for managing selection and scroll position.
+    pub table_state: TableState,
 
     /// Scroll offset within the detail panel.
     pub detail_scroll_offset: usize,
@@ -150,7 +151,7 @@ impl App {
             page_cache: HashMap::new(),
             tweet_collections: HashMap::new(),
             resonance_scores: HashMap::new(),
-            selected_index: 0,
+            table_state: TableState::new().with_selected(Some(0)),
             detail_scroll_offset: 0,
             current_page: 0,
             page_size: 20,
@@ -167,21 +168,28 @@ impl App {
         }
     }
 
+    /// Get the currently selected tweet index.
+    pub fn selected_index(&self) -> usize {
+        self.table_state.selected().unwrap_or(0)
+    }
+
     /// Select the next tweet in the list.
     pub fn select_next(&mut self) {
         if self.tweets.is_empty() {
             return;
         }
-        if self.selected_index < self.tweets.len() - 1 {
-            self.selected_index += 1;
+        let current = self.selected_index();
+        if current < self.tweets.len() - 1 {
+            self.table_state.select(Some(current + 1));
             self.detail_scroll_offset = 0;
         }
     }
 
     /// Select the previous tweet in the list.
     pub fn select_prev(&mut self) {
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
+        let current = self.selected_index();
+        if current > 0 {
+            self.table_state.select(Some(current - 1));
             self.detail_scroll_offset = 0;
         }
     }
@@ -201,13 +209,13 @@ impl App {
 
     /// Get the currently selected tweet, if any.
     pub fn selected_tweet(&self) -> Option<&TweetDisplayData> {
-        self.tweets.get(self.selected_index)
+        self.tweets.get(self.selected_index())
     }
 
     /// Clear all tweets and reset state.
     pub fn clear(&mut self) {
         self.tweets.clear();
-        self.selected_index = 0;
+        self.table_state.select(Some(0));
         self.detail_scroll_offset = 0;
         self.error = None;
     }

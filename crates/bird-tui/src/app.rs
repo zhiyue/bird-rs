@@ -163,7 +163,7 @@ impl App {
             table_state: TableState::new().with_selected(Some(0)),
             detail_scroll_offset: 0,
             current_page: 0,
-            page_size: 20,
+            page_size: 50,
             total_count: 0,
             focus: Focus::List,
             show_help: false,

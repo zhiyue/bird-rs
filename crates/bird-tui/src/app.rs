@@ -30,6 +30,8 @@ pub struct TweetDisplayData {
     pub created_at: Option<String>,
     /// Parsed timestamp in local time (for calendar filtering/sorting).
     pub created_at_local: Option<chrono::DateTime<chrono::Local>>,
+    /// When this tweet was discovered (collection added_at) in local time.
+    pub discovered_at_local: Option<chrono::DateTime<chrono::Local>>,
     /// Tweet interaction counts (from Twitter data).
     pub like_count: Option<u64>,
     pub retweet_count: Option<u64>,

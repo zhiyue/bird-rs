@@ -1,6 +1,6 @@
 //! UI rendering for bird-tui using ratatui.
 
-use crate::app::{App, CalendarFocus, CalendarRange, Focus};
+use crate::app::{App, CalendarFocus, CalendarRange, Focus, TweetDisplayData};
 use crate::data::format_relative_time;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -89,7 +89,7 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
         ..area
     };
 
-    // Define column constraints: Time | Author | Likes | RTs | Replies | Headline
+    // Define column constraints: Seen | Author | Likes | RTs | Replies | Headline
     let widths = [
         Constraint::Length(10), // Time
         Constraint::Length(20), // Author (name + handle)
@@ -109,8 +109,9 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
         .enumerate()
         .map(|(i, tweet)| {
             let time_display = tweet
-                .created_at_local
+                .discovered_at_local
                 .as_ref()
+                .or(tweet.created_at_local.as_ref())
                 .map(format_relative_time)
                 .unwrap_or_else(|| "—".to_string());
 
@@ -189,7 +190,7 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
     let table = Table::new(rows, widths)
         .header(
             Row::new(vec![
-                "Time", "Author", "Likes", "RTs", "Replies", "Headline",
+                "Seen", "Author", "Likes", "RTs", "Replies", "Headline",
             ])
             .style(Style::default().add_modifier(Modifier::BOLD)),
         )
@@ -271,13 +272,15 @@ fn render_right_panel(f: &mut Frame, app: &App, area: Rect) {
         metadata.push(Line::from(vec![
             Span::styled("Created:", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(created_padding),
-            Span::raw(
-                tweet
-                    .created_at
-                    .as_ref()
-                    .cloned()
-                    .unwrap_or_else(|| "—".to_string()),
-            ),
+            Span::raw(format_created_display(tweet)),
+        ]));
+
+        // Discovered line
+        let discovered_padding = " ".repeat(label_width.saturating_sub("Discovered:".len()));
+        metadata.push(Line::from(vec![
+            Span::styled("Discovered:", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(discovered_padding),
+            Span::raw(format_discovered_display(tweet)),
         ]));
 
         // Collections line
@@ -293,10 +296,13 @@ fn render_right_panel(f: &mut Frame, app: &App, area: Rect) {
                 })
                 .collect::<Vec<_>>()
                 .join("   ");
-            let discovered_padding = " ".repeat(label_width.saturating_sub("Discovered:".len()));
+            let collections_padding = " ".repeat(label_width.saturating_sub("Collections:".len()));
             metadata.push(Line::from(vec![
-                Span::styled("Discovered:", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(discovered_padding),
+                Span::styled(
+                    "Collections:",
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(collections_padding),
                 Span::raw(collections_str),
             ]));
         }
@@ -869,6 +875,37 @@ fn truncate_text(text: &str, max_len: usize) -> String {
         String::from("…")
     } else {
         result
+    }
+}
+
+fn format_absolute_time(dt: &chrono::DateTime<chrono::Local>) -> String {
+    dt.format("%Y/%m/%d %-I:%M%p").to_string().to_lowercase()
+}
+
+fn format_created_display(tweet: &TweetDisplayData) -> String {
+    if let Some(dt) = tweet.created_at_local.as_ref() {
+        return format_absolute_time(dt);
+    }
+
+    tweet
+        .created_at
+        .as_ref()
+        .cloned()
+        .unwrap_or_else(|| "—".to_string())
+}
+
+fn format_discovered_display(tweet: &TweetDisplayData) -> String {
+    let Some(dt) = tweet.discovered_at_local.as_ref() else {
+        return "—".to_string();
+    };
+
+    let relative = format_relative_time(dt);
+    let absolute = format_absolute_time(dt);
+
+    if relative.contains('/') {
+        absolute
+    } else {
+        format!("{} ({})", relative, absolute)
     }
 }
 

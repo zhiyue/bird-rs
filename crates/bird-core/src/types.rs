@@ -1,5 +1,6 @@
 //! Core data types for the Twitter client.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Media attachment on a tweet.
@@ -298,4 +299,7 @@ pub struct TweetWithCollections {
     /// Collections this tweet belongs to.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub collections: Vec<String>,
+    /// When this tweet was added to a collection (discovery time).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub added_at: Option<DateTime<Utc>>,
 }

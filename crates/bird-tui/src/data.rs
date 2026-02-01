@@ -124,6 +124,7 @@ fn convert_tweets_to_display(
                 (None, Some(raw)) => Some(raw.to_string()),
                 (None, None) => None,
             };
+            let discovered_at_local = tweet.added_at.map(|dt| dt.with_timezone(&Local));
 
             // Count interactions with this author's tweets across all loaded tweets
             let (author_liked_count, author_quoted_count, author_retweeted_count) = author_id
@@ -142,6 +143,7 @@ fn convert_tweets_to_display(
                 resonance_score,
                 created_at,
                 created_at_local,
+                discovered_at_local,
                 like_count: tweet.tweet.like_count,
                 retweet_count: tweet.tweet.retweet_count,
                 reply_count: tweet.tweet.reply_count,

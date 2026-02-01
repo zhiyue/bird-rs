@@ -426,6 +426,7 @@ impl TweetStore for MemoryStorage {
             .map(|(_, tweet, colls)| TweetWithCollections {
                 tweet,
                 collections: colls,
+                added_at: None,
             })
             .collect();
 

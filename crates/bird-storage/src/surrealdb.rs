@@ -1551,7 +1551,7 @@ impl TweetStore for SurrealDbStorage {
             .take(0)
             .map_err(|e| Error::Storage(format!("Failed to parse collection records: {}", e)))?;
 
-        // Aggregate in application: group by tweet_id, collect collections, find min added_at
+        // Aggregate in application: group by tweet_id, collect collections, find max added_at
         let mut tweet_collections: std::collections::HashMap<
             String,
             (Vec<String>, Option<DateTime<Utc>>),
@@ -1567,10 +1567,10 @@ impl TweetStore for SurrealDbStorage {
                 entry_ref.0.push(entry.collection);
             }
 
-            // Keep the earlier timestamp
+            // Keep the latest timestamp
             match (&entry_ref.1, entry.added_at) {
                 (Some(existing_time), Some(new_time)) => {
-                    if new_time < *existing_time {
+                    if new_time > *existing_time {
                         entry_ref.1 = Some(new_time);
                     }
                 }
@@ -1581,7 +1581,7 @@ impl TweetStore for SurrealDbStorage {
             }
         }
 
-        // Sort by min added_at descending and apply pagination
+        // Sort by max added_at descending and apply pagination
         let mut sorted: Vec<(String, Vec<String>, Option<DateTime<Utc>>)> = tweet_collections
             .into_iter()
             .map(|(id, (colls, time))| (id, colls, time))
@@ -1620,9 +1620,10 @@ impl TweetStore for SurrealDbStorage {
                     sorted
                         .iter()
                         .find(|(id, _, _)| id == &tweet_id)
-                        .map(|(_, colls, _)| TweetWithCollections {
+                        .map(|(_, colls, added_at)| TweetWithCollections {
                             tweet: tweet.clone(),
                             collections: colls.clone(),
+                            added_at: *added_at,
                         })
                 })
             })

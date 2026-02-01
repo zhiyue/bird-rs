@@ -99,33 +99,29 @@ fn convert_tweets_to_display(
         .collect()
 }
 
-/// Preload adjacent pages (next and previous) for faster pagination.
+/// Preload adjacent pages (±2 pages) for faster pagination.
 async fn preload_adjacent_pages(app: &mut App, collections: &[&str]) -> Result<(), String> {
     let total_pages = (app.total_count as u32).div_ceil(app.page_size);
 
-    // Preload next page
-    if app.current_page + 1 < total_pages && !app.page_cache.contains_key(&(app.current_page + 1)) {
-        let offset = (app.current_page + 1) * app.page_size;
-        if let Ok(tweets_result) = app
-            .storage
-            .get_tweets_interleaved(collections, &app.user_id, Some(app.page_size), Some(offset))
-            .await
-        {
-            let display_tweets = convert_tweets_to_display(app, tweets_result);
-            app.page_cache.insert(app.current_page + 1, display_tweets);
-        }
-    }
+    // Pages to preload: current-2, current-1, current+1, current+2
+    let pages_to_preload: Vec<i32> = vec![-2, -1, 1, 2];
 
-    // Preload previous page
-    if app.current_page > 0 && !app.page_cache.contains_key(&(app.current_page - 1)) {
-        let offset = (app.current_page - 1) * app.page_size;
+    for offset_delta in pages_to_preload {
+        let page_num = app.current_page as i32 + offset_delta;
+
+        // Skip if page is out of bounds or already cached
+        if page_num < 0 || page_num >= total_pages as i32 || app.page_cache.contains_key(&(page_num as u32)) {
+            continue;
+        }
+
+        let offset = (page_num as u32) * app.page_size;
         if let Ok(tweets_result) = app
             .storage
             .get_tweets_interleaved(collections, &app.user_id, Some(app.page_size), Some(offset))
             .await
         {
             let display_tweets = convert_tweets_to_display(app, tweets_result);
-            app.page_cache.insert(app.current_page - 1, display_tweets);
+            app.page_cache.insert(page_num as u32, display_tweets);
         }
     }
 

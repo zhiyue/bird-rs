@@ -89,7 +89,7 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
 
     // Define column constraints: ID | Author | Score | Headline
     let widths = [
-        Constraint::Length(12), // ID (wider)
+        Constraint::Length(20), // ID (Twitter IDs are 19 digits)
         Constraint::Length(14), // Author
         Constraint::Length(5),  // Score
         Constraint::Fill(1),    // Headline (takes remaining space)
@@ -104,7 +104,7 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
         .iter()
         .enumerate()
         .map(|(i, tweet)| {
-            let id_display = truncate_id(&tweet.id, 12);
+            let id_display = truncate_id(&tweet.id, 19);
             let author_display = truncate_text(&tweet.author_username, 14);
             let score_display = format!("{:.1}", tweet.resonance_score.total);
             let headline = truncate_text(&tweet.headline, 100); // Much wider now that it fills space

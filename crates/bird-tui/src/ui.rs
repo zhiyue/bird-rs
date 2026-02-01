@@ -26,16 +26,16 @@ pub fn render(f: &mut Frame, app: &App) {
         return;
     }
 
-    // If search is shown, show search modal
-    if app.show_search {
-        render_search_modal(f, app);
-        // Still render main content behind the modal
-    }
-
     // If calendar is shown, show calendar modal
     if app.show_calendar {
         render_calendar(f, app);
-        // Still render main content behind the modal
+        return;
+    }
+
+    // If search is shown, show search modal (renders on top of main content)
+    let show_search = app.show_search;
+    if show_search {
+        render_search_modal(f, app);
     }
 
     // If error, show error

@@ -412,9 +412,8 @@ impl App {
             self.calendar_range = CalendarRange::Month;
             self.calendar_needs_reload = self.calendar_all_tweets.is_empty();
             self.calendar_needs_filter = true;
-            self.calendar_display_month = Self::first_day_of_month(
-                self.calendar_selected_date.unwrap_or(today),
-            );
+            self.calendar_display_month =
+                Self::first_day_of_month(self.calendar_selected_date.unwrap_or(today));
         } else {
             self.calendar_selected_date = None;
         }
@@ -570,8 +569,7 @@ impl App {
         match self.calendar_range {
             CalendarRange::Day => Some((selected_naive, selected_naive)),
             CalendarRange::Week => {
-                let weekday_offset =
-                    selected.weekday().number_days_from_sunday() as i64;
+                let weekday_offset = selected.weekday().number_days_from_sunday() as i64;
                 let start = selected_naive - chrono::Duration::days(weekday_offset);
                 let mut end = start + chrono::Duration::days(6);
                 if end > today_naive {
@@ -627,8 +625,7 @@ impl App {
 
     fn today_date() -> Date {
         let today = chrono::Local::now().date_naive();
-        let month =
-            Month::try_from(today.month() as u8).unwrap_or(Month::January);
+        let month = Month::try_from(today.month() as u8).unwrap_or(Month::January);
         Date::from_calendar_date(today.year(), month, today.day() as u8)
             .unwrap_or_else(|_| Date::from_calendar_date(1970, Month::January, 1).unwrap())
     }
@@ -643,16 +640,11 @@ impl App {
     }
 
     fn first_day_of_month(date: Date) -> Date {
-        Date::from_calendar_date(date.year(), date.month(), 1)
-            .unwrap_or(date)
+        Date::from_calendar_date(date.year(), date.month(), 1).unwrap_or(date)
     }
 
     fn date_to_naive(date: Date) -> Option<chrono::NaiveDate> {
-        chrono::NaiveDate::from_ymd_opt(
-            date.year(),
-            date.month() as u32,
-            date.day() as u32,
-        )
+        chrono::NaiveDate::from_ymd_opt(date.year(), date.month() as u32, date.day() as u32)
     }
 
     fn naive_to_date(date: chrono::NaiveDate) -> Option<Date> {

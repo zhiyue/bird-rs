@@ -1,6 +1,7 @@
 //! Application state management for bird-tui.
 
 use bird_storage::{ResonanceScore, Storage};
+use ratatui::style::Color;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -29,6 +30,58 @@ pub struct TweetDisplayData {
 pub enum Focus {
     List,
     Detail,
+}
+
+/// Available color themes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeMode {
+    Dark,
+    Light,
+}
+
+/// Color theme configuration.
+#[derive(Debug, Clone)]
+pub struct Theme {
+    pub mode: ThemeMode,
+    pub primary: Color,
+    pub highlight: Color,
+    pub border: Color,
+    pub text: Color,
+    pub background: Color,
+}
+
+impl Theme {
+    /// Create a dark theme.
+    pub fn dark() -> Self {
+        Self {
+            mode: ThemeMode::Dark,
+            primary: Color::Cyan,
+            highlight: Color::Blue,
+            border: Color::DarkGray,
+            text: Color::White,
+            background: Color::Black,
+        }
+    }
+
+    /// Create a light theme.
+    pub fn light() -> Self {
+        Self {
+            mode: ThemeMode::Light,
+            primary: Color::Blue,
+            highlight: Color::Yellow,
+            border: Color::White,
+            text: Color::Black,
+            background: Color::White,
+        }
+    }
+
+    /// Toggle between dark and light themes.
+    pub fn toggle(&mut self) {
+        *self = match self.mode {
+            ThemeMode::Dark => Self::light(),
+            ThemeMode::Light => Self::dark(),
+        };
+    }
 }
 
 /// Main application state.
@@ -84,6 +137,9 @@ pub struct App {
 
     /// Frame counter for animations.
     pub frame: u32,
+
+    /// Current color theme.
+    pub theme: Theme,
 }
 
 impl App {
@@ -107,6 +163,7 @@ impl App {
             user_id,
             list_scroll_pos: 0,
             frame: 0,
+            theme: Theme::dark(),
         }
     }
 

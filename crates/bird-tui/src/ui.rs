@@ -98,8 +98,8 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
 
             let style = if i == app.selected_index {
                 Style::default()
-                    .bg(Color::Blue)
-                    .fg(Color::White)
+                    .bg(app.theme.highlight)
+                    .fg(app.theme.text)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
@@ -130,10 +130,11 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
                     (app.total_count as u32).div_ceil(app.page_size)
                 ))
                 .borders(Borders::ALL)
-                .border_type(ratatui::widgets::BorderType::Rounded),
+                .border_type(ratatui::widgets::BorderType::Rounded)
+                .style(Style::default().fg(app.theme.border)),
         )
         .style(if app.focus == Focus::List {
-            Style::default().fg(Color::Green)
+            Style::default().fg(app.theme.primary)
         } else {
             Style::default()
         });
@@ -296,8 +297,8 @@ fn render_loading(f: &mut Frame, app: &App) {
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded);
 
-    let paragraph = Paragraph::new(format!("{} Loading tweets...", spinner))
-        .alignment(Alignment::Center);
+    let paragraph =
+        Paragraph::new(format!("{} Loading tweets...", spinner)).alignment(Alignment::Center);
 
     f.render_widget(block, f.area());
     f.render_widget(paragraph, f.area());
@@ -428,7 +429,7 @@ fn truncate_text(text: &str, max_len: usize) -> String {
 }
 
 /// Render the status bar at the bottom showing hotkeys.
-fn render_status_bar(f: &mut Frame, _app: &App, area: Rect) {
+fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let status = Line::from(vec![
         Span::styled("↑↓", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" Navigate  "),
@@ -436,6 +437,8 @@ fn render_status_bar(f: &mut Frame, _app: &App, area: Rect) {
         Span::raw(" Page  "),
         Span::styled("Tab", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" Focus  "),
+        Span::styled("Ctrl+T", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" Theme  "),
         Span::styled("Ctrl+?", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" Help  "),
         Span::styled("q", Style::default().add_modifier(Modifier::BOLD)),
@@ -443,7 +446,7 @@ fn render_status_bar(f: &mut Frame, _app: &App, area: Rect) {
     ]);
 
     let status_widget = Paragraph::new(status)
-        .style(Style::default().bg(Color::DarkGray).fg(Color::White))
+        .style(Style::default().bg(app.theme.border).fg(app.theme.text))
         .alignment(Alignment::Left);
 
     f.render_widget(status_widget, area);

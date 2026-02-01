@@ -47,6 +47,12 @@ fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<bool, String> {
             Ok(false)
         }
 
+        // Theme toggle
+        KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.theme.toggle();
+            Ok(false)
+        }
+
         // List navigation
         KeyCode::Up => {
             app.select_prev();

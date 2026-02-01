@@ -81,6 +81,9 @@ pub struct App {
 
     /// Scroll position in the tweet list (for scrollbar display).
     pub list_scroll_pos: u16,
+
+    /// Frame counter for animations.
+    pub frame: u32,
 }
 
 impl App {
@@ -103,6 +106,7 @@ impl App {
             storage,
             user_id,
             list_scroll_pos: 0,
+            frame: 0,
         }
     }
 

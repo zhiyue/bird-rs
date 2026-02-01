@@ -5,7 +5,10 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table, Wrap},
+    widgets::{
+        Block, Borders, Cell, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Table, Wrap,
+    },
     Frame,
 };
 
@@ -139,8 +142,8 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
 
     // Render scrollbar
     if !app.tweets.is_empty() {
-        let mut scrollbar_state = ScrollbarState::new(app.tweets.len())
-            .position(app.selected_index);
+        let mut scrollbar_state =
+            ScrollbarState::new(app.tweets.len()).position(app.selected_index);
 
         f.render_stateful_widget(
             Scrollbar::default()
@@ -281,14 +284,20 @@ fn render_right_panel(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-/// Render loading state.
-fn render_loading(f: &mut Frame, _app: &App) {
+/// Render loading state with animated spinner.
+fn render_loading(f: &mut Frame, app: &App) {
+    // Animated spinner symbols
+    let spinner_symbols = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let spinner_frame = (app.frame as usize) % spinner_symbols.len();
+    let spinner = spinner_symbols[spinner_frame];
+
     let block = Block::default()
         .title(" Loading... ")
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded);
 
-    let paragraph = Paragraph::new("Loading tweets...").alignment(Alignment::Center);
+    let paragraph = Paragraph::new(format!("{} Loading tweets...", spinner))
+        .alignment(Alignment::Center);
 
     f.render_widget(block, f.area());
     f.render_widget(paragraph, f.area());

@@ -215,6 +215,9 @@ async fn run_app(
             ui::render(f, app);
         })?;
 
+        // Increment frame counter for animations
+        app.frame = app.frame.wrapping_add(1);
+
         // Handle events
         match events::handle_events(app).await {
             Ok(true) => break, // User quit

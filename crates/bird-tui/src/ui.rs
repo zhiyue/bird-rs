@@ -285,7 +285,11 @@ fn render_right_panel(f: &mut Frame, app: &App, area: Rect) {
         f.render_widget(metadata_block, chunks[0]);
 
         // Tweet text content (scrollable)
-        let text_content = vec![Line::from(Span::raw(tweet.text.as_str()))];
+        let text_content: Vec<Line> = tweet
+            .text
+            .lines()
+            .map(|line| Line::from(Span::raw(line)))
+            .collect();
 
         let text_block = Paragraph::new(text_content)
             .block(

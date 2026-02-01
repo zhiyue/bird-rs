@@ -128,6 +128,14 @@ pub struct App {
 
     /// Resonance scores for all tweets in database.
     pub resonance_scores: HashMap<String, ResonanceScore>,
+    /// Cached reply counts by tweet ID (user interactions).
+    pub reply_count_map: HashMap<String, u32>,
+    /// Cached quote counts by tweet ID (user interactions).
+    pub quote_count_map: HashMap<String, u32>,
+    /// Cached retweet counts by tweet ID (user interactions).
+    pub retweet_count_map: HashMap<String, u32>,
+    /// Whether interaction maps have been loaded.
+    pub interaction_maps_loaded: bool,
 
     /// Table state for managing selection and scroll position.
     pub table_state: TableState,
@@ -225,6 +233,10 @@ impl App {
             page_cache: HashMap::new(),
             tweet_collections: HashMap::new(),
             resonance_scores: HashMap::new(),
+            reply_count_map: HashMap::new(),
+            quote_count_map: HashMap::new(),
+            retweet_count_map: HashMap::new(),
+            interaction_maps_loaded: false,
             table_state: TableState::new().with_selected(Some(0)),
             detail_scroll_offset: 0,
             current_page: 0,

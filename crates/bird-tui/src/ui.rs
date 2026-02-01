@@ -301,16 +301,17 @@ fn render_right_panel(f: &mut Frame, app: &App, area: Rect) {
             ]));
         }
 
-        // Interactions line
-        let interactions_padding = " ".repeat(label_width.saturating_sub("Interactions:".len()));
+        // Activity line
+        let activity_padding = " ".repeat(label_width.saturating_sub("Activity:".len()));
+        let liked = if tweet.resonance_score.liked { 1 } else { 0 };
+        let bookmarked = if tweet.resonance_score.bookmarked { 1 } else { 0 };
         metadata.push(Line::from(vec![
-            Span::styled(
-                "Interactions:",
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(interactions_padding),
+            Span::styled("Activity:", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(activity_padding),
             Span::raw(format!(
-                "↩ {}  💬 {}  🔄 {}",
+                "❤ {}  🔖 {}  ↩ {}  💬 {}  🔄 {}",
+                liked,
+                bookmarked,
                 tweet.resonance_score.reply_count,
                 tweet.resonance_score.quote_count,
                 tweet.resonance_score.retweet_count

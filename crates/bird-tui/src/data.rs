@@ -101,21 +101,24 @@ fn convert_tweets_to_display(
             let tweet_id = tweet.tweet.id.clone();
             let author_id = tweet.tweet.author_id.clone();
 
-            let resonance_score =
-                app.resonance_scores
-                    .get(&tweet_id)
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        ResonanceScore::new(
-                            tweet_id.clone(),
-                            app.user_id.clone(),
-                            false,
-                            false,
-                            0,
-                            0,
-                            0,
-                        )
-                    });
+            let liked = tweet.collections.iter().any(|c| c == "likes");
+            let bookmarked = tweet.collections.iter().any(|c| c == "bookmarks");
+            let reply_count = app.reply_count_map.get(&tweet_id).copied().unwrap_or(0);
+            let quote_count = app.quote_count_map.get(&tweet_id).copied().unwrap_or(0);
+            let retweet_count = app
+                .retweet_count_map
+                .get(&tweet_id)
+                .copied()
+                .unwrap_or(0);
+            let resonance_score = ResonanceScore::new(
+                tweet_id.clone(),
+                app.user_id.clone(),
+                liked,
+                bookmarked,
+                reply_count,
+                quote_count,
+                retweet_count,
+            );
 
             let collections_vec = tweet.collections.clone();
             let created_at_raw = tweet.tweet.created_at.as_deref();
@@ -213,23 +216,41 @@ pub async fn compute_resonance_scores(app: &mut App) -> Result<(), String> {
     app.loading = true;
 
     // Batch fetch all interaction pairs
-    let reply_pairs = app
+    let reply_pairs = match app
         .storage
         .get_user_reply_tweets(&app.user_id, None)
         .await
-        .map_err(|e| format!("Failed to fetch replies: {}", e))?;
+    {
+        Ok(pairs) => pairs,
+        Err(e) => {
+            app.loading = false;
+            return Err(format!("Failed to fetch replies: {}", e));
+        }
+    };
 
-    let quote_pairs = app
+    let quote_pairs = match app
         .storage
         .get_user_quote_tweets(&app.user_id, None)
         .await
-        .map_err(|e| format!("Failed to fetch quotes: {}", e))?;
+    {
+        Ok(pairs) => pairs,
+        Err(e) => {
+            app.loading = false;
+            return Err(format!("Failed to fetch quotes: {}", e));
+        }
+    };
 
-    let retweet_pairs = app
+    let retweet_pairs = match app
         .storage
         .get_user_retweets(&app.user_id, None)
         .await
-        .map_err(|e| format!("Failed to fetch retweets: {}", e))?;
+    {
+        Ok(pairs) => pairs,
+        Err(e) => {
+            app.loading = false;
+            return Err(format!("Failed to fetch retweets: {}", e));
+        }
+    };
 
     // Build count maps
     let mut reply_count_map: HashMap<String, u32> = HashMap::new();
@@ -247,12 +268,11 @@ pub async fn compute_resonance_scores(app: &mut App) -> Result<(), String> {
         *retweet_count_map.entry(tweet_id).or_insert(0) += 1;
     }
 
-    // Cache the maps for later computation
+    app.reply_count_map = reply_count_map;
+    app.quote_count_map = quote_count_map;
+    app.retweet_count_map = retweet_count_map;
     app.resonance_scores.clear();
-
-    // Compute scores for a sample (we'll compute on-demand for displayed tweets)
-    // This is just storing the count maps; actual scores computed when rendering
-
+    app.interaction_maps_loaded = true;
     app.loading = false;
     Ok(())
 }

@@ -203,6 +203,10 @@ async fn run_app(
     app: &mut App,
 ) -> Result<()> {
     // Load initial tweets
+    if let Err(_e) = data::compute_resonance_scores(app).await {
+        // Best-effort; continue without interaction maps if unavailable.
+    }
+
     if let Err(e) = data::load_page_tweets(app, &["likes", "bookmarks"]).await {
         app.set_error(e);
     }

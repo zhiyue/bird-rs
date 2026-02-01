@@ -1,6 +1,7 @@
 //! UI rendering for bird-tui using ratatui.
 
 use crate::app::{App, CalendarFocus, CalendarRange, Focus};
+use crate::data::format_relative_time;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -11,6 +12,7 @@ use ratatui::{
     },
     Frame,
 };
+use std::cmp::min;
 
 /// Render the entire TUI frame.
 pub fn render(f: &mut Frame, app: &App) {
@@ -87,11 +89,13 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
         ..area
     };
 
-    // Define column constraints: ID | Author | Score | Headline
+    // Define column constraints: Time | Author | Likes | RTs | Replies | Headline
     let widths = [
-        Constraint::Length(20), // ID (Twitter IDs are 19 digits)
-        Constraint::Length(14), // Author
-        Constraint::Length(5),  // Score
+        Constraint::Length(10), // Time
+        Constraint::Length(20), // Author (name + handle)
+        Constraint::Length(6),  // Likes
+        Constraint::Length(6),  // Retweets
+        Constraint::Length(6),  // Replies
         Constraint::Fill(1),    // Headline (takes remaining space)
     ];
 
@@ -104,10 +108,24 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
         .iter()
         .enumerate()
         .map(|(i, tweet)| {
-            let id_display = truncate_id(&tweet.id, 19);
-            let author_display = truncate_text(&tweet.author_username, 14);
-            let score_display = format!("{:.1}", tweet.resonance_score.total);
-            let headline = truncate_text(&tweet.headline, 100); // Much wider now that it fills space
+            let time_display = tweet
+                .created_at_local
+                .as_ref()
+                .map(format_relative_time)
+                .unwrap_or_else(|| "—".to_string());
+
+            let combined_author = format!("{} @{}", tweet.author_name, tweet.author_username);
+            let author_display = if combined_author.chars().count() <= 20 {
+                combined_author
+            } else {
+                format!("@{}", tweet.author_username)
+            };
+            let author_display = truncate_text(&author_display, 20);
+
+            let likes_display = format_count(tweet.like_count);
+            let retweets_display = format_count(tweet.retweet_count);
+            let replies_display = format_count(tweet.reply_count);
+            let headline = truncate_text(&tweet.headline, 100); // Wider since ID/score removed
 
             let style = if i == selected_index {
                 Style::default()
@@ -119,31 +137,63 @@ fn render_left_panel(f: &mut Frame, app: &App, area: Rect) {
             };
 
             Row::new(vec![
-                Cell::from(id_display),
+                Cell::from(time_display),
                 Cell::from(author_display),
-                Cell::from(score_display),
+                Cell::from(likes_display),
+                Cell::from(retweets_display),
+                Cell::from(replies_display),
                 Cell::from(headline),
             ])
             .style(style)
         })
         .collect();
 
+    let (title, border_type, border_style) = if app.show_search {
+        let filtered_total = display_tweets.len() as u64;
+        let (start, end) = if filtered_total == 0 {
+            (0, 0)
+        } else {
+            (1, filtered_total)
+        };
+        (
+            format!(" Filtered Tweets (Showing {}-{} of {}) ", start, end, filtered_total),
+            ratatui::widgets::BorderType::Double,
+            Style::default().fg(app.theme.primary),
+        )
+    } else {
+        let total = app.total_count;
+        let page_start = if total == 0 {
+            0
+        } else {
+            (app.current_page as u64 * app.page_size as u64) + 1
+        };
+        let page_end = if total == 0 {
+            0
+        } else {
+            min(
+                (app.current_page as u64 + 1) * app.page_size as u64,
+                total,
+            )
+        };
+        (
+            format!(" Tweets (Showing {}-{} of {}) ", page_start, page_end, total),
+            ratatui::widgets::BorderType::Rounded,
+            Style::default().fg(app.theme.border),
+        )
+    };
+
     // Create table with header
     let table = Table::new(rows, widths)
         .header(
-            Row::new(vec!["ID", "Author", "Score", "Headline"])
+            Row::new(vec!["Time", "Author", "Likes", "RTs", "Replies", "Headline"])
                 .style(Style::default().add_modifier(Modifier::BOLD)),
         )
         .block(
             Block::default()
-                .title(format!(
-                    " Tweets (Page {}/{}) ",
-                    app.current_page + 1,
-                    (app.total_count as u32).div_ceil(app.page_size)
-                ))
+                .title(title)
                 .borders(Borders::ALL)
-                .border_type(ratatui::widgets::BorderType::Rounded)
-                .style(Style::default().fg(app.theme.border)),
+                .border_type(border_type)
+                .style(border_style),
         )
         .style(if app.focus == Focus::List {
             Style::default().fg(app.theme.primary)
@@ -755,7 +805,18 @@ fn collection_emoji(collections: &[String]) -> String {
     result
 }
 
+/// Format interaction counts for compact display.
+fn format_count(count: Option<u64>) -> String {
+    match count {
+        None => "—".to_string(),
+        Some(value) if value < 1_000 => value.to_string(),
+        Some(value) if value < 1_000_000 => format!("{}k", value / 1_000),
+        Some(value) => format!("{}M", value / 1_000_000),
+    }
+}
+
 /// Truncate tweet ID to a maximum length, ensuring UTF-8 safety.
+#[allow(dead_code)]
 fn truncate_id(id: &str, max_len: usize) -> String {
     let mut result = String::new();
     let mut byte_count = 0;

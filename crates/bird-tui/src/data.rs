@@ -143,6 +143,9 @@ fn convert_tweets_to_display(
                 resonance_score,
                 created_at,
                 created_at_local,
+                like_count: tweet.tweet.like_count,
+                retweet_count: tweet.tweet.retweet_count,
+                reply_count: tweet.tweet.reply_count,
                 author_liked_count,
                 author_quoted_count,
                 author_retweeted_count,
@@ -319,6 +322,34 @@ fn parse_created_at(ts_str: &str) -> Option<DateTime<Local>> {
 /// Format a timestamp into a readable local string.
 fn format_timestamp_local(dt: &DateTime<Local>) -> String {
     dt.format("%a %b %d %I:%M%p").to_string().to_lowercase()
+}
+
+/// Format a timestamp as a relative time (e.g., 2h ago, 3d ago, or YYYY/MM/DD).
+pub fn format_relative_time(dt: &DateTime<Local>) -> String {
+    let now = Local::now();
+    let diff = now.signed_duration_since(*dt);
+    let seconds = diff.num_seconds().max(0);
+
+    if seconds < 60 {
+        return "now".to_string();
+    }
+
+    let minutes = diff.num_minutes();
+    if minutes < 60 {
+        return format!("{}m ago", minutes.max(1));
+    }
+
+    let hours = diff.num_hours();
+    if hours < 24 {
+        return format!("{}h ago", hours);
+    }
+
+    let days = diff.num_days();
+    if days < 30 {
+        return format!("{}d ago", days);
+    }
+
+    dt.format("%Y/%m/%d").to_string()
 }
 
 #[cfg(test)]

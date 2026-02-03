@@ -27,7 +27,11 @@ pub async fn run_sync_all(
     max_storage: Option<String>,
     show_emoji: bool,
 ) -> anyhow::Result<()> {
-    let collections = [Collection::Likes, Collection::Bookmarks, Collection::UserTweets];
+    let collections = [
+        Collection::Likes,
+        Collection::Bookmarks,
+        Collection::UserTweets,
+    ];
     let total = collections.len();
 
     let icon = if show_emoji { "🚀 " } else { "" };

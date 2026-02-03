@@ -27,25 +27,25 @@ bird sync likes
 
 ## Commands
 
-| Command               | Description                   |
-| --------------------- | ----------------------------- |
-| `bird <id>`           | Read a tweet by ID or URL     |
-| `bird whoami`         | Show logged-in account        |
-| `bird likes`          | Fetch your liked tweets       |
-| `bird bookmarks`      | Fetch your bookmarks          |
-| `bird list`           | List all synced tweets (interleaved from likes, bookmarks, posts) |
-| `bird list likes`     | List synced likes from DB     |
-| `bird list bookmarks` | List synced bookmarks from DB |
-| `bird list user_tweets` | List synced posts from DB   |
-| `bird sync likes`     | Sync likes to local DB        |
-| `bird sync bookmarks` | Sync bookmarks to local DB    |
-| `bird sync posts`     | Sync your own tweets to DB    |
-| `bird sync status`    | Show sync progress            |
-| `bird db repair`      | Heal missing data: backfill headlines and recalculate resonance scores |
-| `bird insights generate` | Analyze tweets with LLM    |
-| `bird db status`      | Show database status and counts |
-| `bird db optimize`    | Ensure schema and indexes exist |
-| `bird config init`    | Write a default config file   |
+| Command                  | Description                                                            |
+| ------------------------ | ---------------------------------------------------------------------- |
+| `bird <id>`              | Read a tweet by ID or URL                                              |
+| `bird whoami`            | Show logged-in account                                                 |
+| `bird likes`             | Fetch your liked tweets                                                |
+| `bird bookmarks`         | Fetch your bookmarks                                                   |
+| `bird list`              | List all synced tweets (interleaved from likes, bookmarks, posts)      |
+| `bird list likes`        | List synced likes from DB                                              |
+| `bird list bookmarks`    | List synced bookmarks from DB                                          |
+| `bird list user_tweets`  | List synced posts from DB                                              |
+| `bird sync likes`        | Sync likes to local DB                                                 |
+| `bird sync bookmarks`    | Sync bookmarks to local DB                                             |
+| `bird sync posts`        | Sync your own tweets to DB                                             |
+| `bird sync status`       | Show sync progress                                                     |
+| `bird db repair`         | Heal missing data: backfill headlines and recalculate resonance scores |
+| `bird insights generate` | Analyze tweets with LLM                                                |
+| `bird db status`         | Show database status and counts                                        |
+| `bird db optimize`       | Ensure schema and indexes exist                                        |
+| `bird config init`       | Write a default config file                                            |
 
 ## Sync
 
@@ -70,7 +70,9 @@ explicitly backfill older history over multiple sessions.
 
 ## Collections & Interleaved View
 
-By default, `bird list` shows an **interleaved view** of all your collections (likes, bookmarks, posts) in a single list, deduplicated and ordered by earliest discovery time:
+By default, `bird list` shows an **interleaved view** of all your collections
+(likes, bookmarks, posts) in a single list, deduplicated and ordered by earliest
+discovery time:
 
 ```bash
 # Show all collections interleaved (default)
@@ -136,7 +138,9 @@ bird db backfill-headlines --max-tweets 100 --min-length 200
 
 ## Resonance Scores
 
-Bird tracks which tweets resonated most with you using a **synergistic resonance formula** that accounts for both passive and active interactions. Interactions compound multiplicatively, rewarding tweets with multiple signals of engagement.
+Bird tracks which tweets resonated most with you using a **synergistic resonance
+formula** that accounts for both passive and active interactions. Interactions
+compound multiplicatively, rewarding tweets with multiple signals of engagement.
 
 ### Formula
 
@@ -184,7 +188,8 @@ bird list --columns id,text,collections,score
 - `bookmarked` — Whether you bookmarked it (Yes/No)
 - `score` — Resonance score (computed from interactions)
 - `headline` — LLM-generated headline (for tweets >200 chars)
-- `collections` — Which collections contain this tweet (❤️ for likes, 🔖 for bookmarks, 📝 for your posts)
+- `collections` — Which collections contain this tweet (❤️ for likes, 🔖 for
+  bookmarks, 📝 for your posts)
 
 ### Keeping Scores Up-to-Date
 

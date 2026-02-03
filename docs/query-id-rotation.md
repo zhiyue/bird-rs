@@ -2,30 +2,40 @@
 
 ## Context
 
-Twitter's web client uses a GraphQL API at `x.com/i/api/graphql/{queryId}/{OperationName}`. Each operation (Likes, Bookmarks, TweetDetail, etc.) requires a specific query ID that Twitter rotates periodically.
+Twitter's web client uses a GraphQL API at
+`x.com/i/api/graphql/{queryId}/{OperationName}`. Each operation (Likes,
+Bookmarks, TweetDetail, etc.) requires a specific query ID that Twitter rotates
+periodically.
 
 ## The Problem
 
 When Twitter rotates query IDs, requests with stale IDs fail with:
+
 - HTTP 404
 - `"Query: Unspecified"` error in the response
 
 This breaks API clients until they're updated with fresh IDs.
 
 **Example error:**
+
 ```
 Error: Twitter API error: Query: Unspecified
 ```
 
 ## Solution: Dynamic Query ID Discovery
 
-Bird implements automatic query ID discovery by scraping Twitter's JavaScript bundles at runtime. This is a self-healing system that recovers from ID rotation without manual intervention.
+Bird implements automatic query ID discovery by scraping Twitter's JavaScript
+bundles at runtime. This is a self-healing system that recovers from ID rotation
+without manual intervention.
 
 ### How It Works
 
-1. **Cache Check**: First checks disk cache at `~/.bird/query-ids-cache.json` (24-hour TTL)
-2. **Discovery**: If cache is stale or missing, fetches X.com pages and extracts JS bundle URLs
-3. **Extraction**: Downloads bundles and uses regex patterns to extract query IDs
+1. **Cache Check**: First checks disk cache at `~/.bird/query-ids-cache.json`
+   (24-hour TTL)
+2. **Discovery**: If cache is stale or missing, fetches X.com pages and extracts
+   JS bundle URLs
+3. **Extraction**: Downloads bundles and uses regex patterns to extract query
+   IDs
 4. **Caching**: Saves discovered IDs to disk and memory for future use
 5. **Fallback**: If discovery fails, falls back to static IDs in source code
 
@@ -52,7 +62,8 @@ impl QueryIdManager {
 
 ### Auto-Refresh on Errors
 
-Operations like `fetch_likes` automatically refresh query IDs when they encounter stale ID errors:
+Operations like `fetch_likes` automatically refresh query IDs when they
+encounter stale ID errors:
 
 ```rust
 match self.fetch_likes_with_ids(user_id, options).await {
@@ -74,7 +85,8 @@ match self.fetch_likes_with_ids(user_id, options).await {
 
 ## Static Fallbacks
 
-As a last resort, static fallback query IDs are defined in `crates/bird-client/src/constants.rs`:
+As a last resort, static fallback query IDs are defined in
+`crates/bird-client/src/constants.rs`:
 
 ```rust
 Operation::Likes => &[
@@ -89,20 +101,26 @@ Operations try each ID in sequence until one works.
 
 ## How steipete/bird Solves This
 
-The TypeScript [bird](https://github.com/steipete/bird) project implements a 3-layer system:
+The TypeScript [bird](https://github.com/steipete/bird) project implements a
+3-layer system:
 
 ### Layer 1: Static Fallbacks
+
 Hard-coded IDs in source code as last resort.
 
 ### Layer 2: Runtime Cache
+
 - Disk cache: `~/.config/bird/query-ids-cache.json`
 - Memory cache for fast access
 - 24-hour TTL
 
 ### Layer 3: Dynamic Discovery
+
 When a 404 is detected:
+
 1. Fetch X.com pages (homepage, /explore, /notifications, /settings/profile)
-2. Extract `<script src="...">` URLs pointing to `abs.twimg.com/responsive-web/client-web/*.js`
+2. Extract `<script src="...">` URLs pointing to
+   `abs.twimg.com/responsive-web/client-web/*.js`
 3. Download JS bundles (6 in parallel)
 4. Extract query IDs using regex patterns:
    ```regex
@@ -114,14 +132,17 @@ When a 404 is detected:
 ## Proposed Solutions
 
 ### Option A: Manual Updates (Current)
+
 **Approach:** Periodically update hardcoded IDs manually.
 
 **Pros:**
+
 - Simple implementation
 - No runtime network overhead
 - No scraping complexity
 
 **Cons:**
+
 - Breaks when IDs rotate
 - Requires manual intervention
 - Users experience failures until we release updates
@@ -131,14 +152,17 @@ When a 404 is detected:
 ---
 
 ### Option B: Dynamic Discovery (Like steipete/bird)
+
 **Approach:** Scrape Twitter's JS bundles at runtime to extract fresh IDs.
 
 **Pros:**
+
 - Self-healing: automatically recovers from ID rotation
 - No manual updates needed
 - Works indefinitely (as long as bundle structure is stable)
 
 **Cons:**
+
 - Complex implementation (HTML parsing, JS bundle fetching, regex extraction)
 - Runtime network overhead (mitigated by caching)
 - Fragile: Twitter could change bundle structure/obfuscation
@@ -147,6 +171,7 @@ When a 404 is detected:
 **Effort:** Medium-high (2-4 hours)
 
 **Implementation outline:**
+
 ```rust
 // crates/bird-client/src/query_ids.rs
 
@@ -179,14 +204,18 @@ async fn discover_query_ids() -> Result<HashMap<String, String>> {
 ---
 
 ### Option C: Hybrid with CLI Refresh Command
-**Approach:** Add a `bird query-ids refresh` command that users can run manually.
+
+**Approach:** Add a `bird query-ids refresh` command that users can run
+manually.
 
 **Pros:**
+
 - Simpler than full auto-discovery
 - User-controlled (no surprise network requests)
 - Can be run in CI/CD to keep IDs fresh
 
 **Cons:**
+
 - Still requires user intervention
 - Not self-healing
 
@@ -195,14 +224,18 @@ async fn discover_query_ids() -> Result<HashMap<String, String>> {
 ---
 
 ### Option D: External Query ID Service
-**Approach:** Host a service that scrapes Twitter and provides fresh IDs via API.
+
+**Approach:** Host a service that scrapes Twitter and provides fresh IDs via
+API.
 
 **Pros:**
+
 - Centralizes scraping logic
 - Clients stay simple
 - Can monitor for ID changes
 
 **Cons:**
+
 - Requires hosting infrastructure
 - Single point of failure
 - Privacy concerns (clients phone home)
@@ -213,9 +246,11 @@ async fn discover_query_ids() -> Result<HashMap<String, String>> {
 
 ## Implementation Notes
 
-**Option B (dynamic discovery) is now implemented.** The system is self-healing and automatically recovers from query ID rotation.
+**Option B (dynamic discovery) is now implemented.** The system is self-healing
+and automatically recovers from query ID rotation.
 
 Key files:
+
 - `crates/bird-client/src/query_ids.rs` - Discovery and caching logic
 - `crates/bird-client/src/constants.rs` - Static fallback IDs
 - `crates/bird-client/src/operations/likes.rs` - Auto-refresh on errors
@@ -223,6 +258,7 @@ Key files:
 ## Technical Details
 
 ### Bundle URL Pattern
+
 ```regex
 https://abs\.twimg\.com/responsive-web/client-web(?:-legacy)?/[A-Za-z0-9.-]+\.js
 ```
@@ -230,11 +266,13 @@ https://abs\.twimg\.com/responsive-web/client-web(?:-legacy)?/[A-Za-z0-9.-]+\.js
 ### Query ID Extraction Patterns
 
 Twitter's minified JS contains exports like:
+
 ```javascript
 e.exports={queryId:"ETJflBunfqNa1uE1mBPCaw",operationName:"Likes",...}
 ```
 
 Regex patterns to extract (need multiple due to property order variations):
+
 ```regex
 // Pattern 1: queryId first
 e\.exports=\{queryId\s*:\s*["']([^"']+)["']\s*,\s*operationName\s*:\s*["']([^"']+)["']
@@ -247,6 +285,7 @@ queryId\s*[:=]\s*["']([^"']+)["'](.{0,4000}?)operationName\s*[:=]\s*["']([^"']+)
 ```
 
 ### Cache File Structure
+
 ```json
 {
   "fetched_at": "2025-01-30T12:34:56Z",
@@ -260,6 +299,7 @@ queryId\s*[:=]\s*["']([^"']+)["'](.{0,4000}?)operationName\s*[:=]\s*["']([^"']+)
 ```
 
 ### Target Operations
+
 ```
 CreateTweet, TweetDetail, Likes, Bookmarks, BookmarkFolderTimeline,
 Following, Followers, UserTweets, SearchTimeline, HomeTimeline

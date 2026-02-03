@@ -1,6 +1,7 @@
 # AGENTS.md
 
-You are working on **bird-rs**, a fast X/Twitter CLI written in Rust for reading tweets and syncing collections (likes, bookmarks) to a local SurrealDB database.
+You are working on **bird-rs**, a fast X/Twitter CLI written in Rust for reading
+tweets and syncing collections (likes, bookmarks) to a local SurrealDB database.
 
 ## Influences
 
@@ -172,7 +173,8 @@ Run tests with: `cargo test --workspace`
 - Run `cargo test --workspace` to verify changes
 - Use `?` operator for error propagation
 - Add `#[derive(Debug, Clone, Serialize, Deserialize)]` to domain types
-- Use `Option<T>` for nullable fields with `#[serde(skip_serializing_if = "Option::is_none")]`
+- Use `Option<T>` for nullable fields with
+  `#[serde(skip_serializing_if = "Option::is_none")]`
 - Follow existing module organization patterns
 
 ### Ask First

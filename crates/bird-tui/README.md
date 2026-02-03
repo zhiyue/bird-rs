@@ -1,11 +1,13 @@
 # bird-tui
 
-A terminal user interface (TUI) for browsing and exploring your synced tweets from the bird database.
+A terminal user interface (TUI) for browsing and exploring your synced tweets
+from the bird database.
 
 ## Features
 
 - **Two-Panel Layout**
-  - Left panel: Scrollable list of tweets with ID, headline, and collection indicators
+  - Left panel: Scrollable list of tweets with ID, headline, and collection
+    indicators
   - Right panel: Detailed view of selected tweet with full text and metadata
 
 - **Efficient Navigation**
@@ -36,7 +38,8 @@ cargo build --release -p bird-tui
 
 ### Authentication
 
-bird-tui needs your Twitter authentication credentials to fetch your current user ID from the API. Provide either:
+bird-tui needs your Twitter authentication credentials to fetch your current
+user ID from the API. Provide either:
 
 ```bash
 # Extract from browser automatically (recommended)
@@ -61,7 +64,8 @@ bird-tui needs your Twitter authentication credentials to fetch your current use
 
 ### Configuration
 
-bird-tui supports the same storage configuration options as bird-cli, plus Twitter authentication:
+bird-tui supports the same storage configuration options as bird-cli, plus
+Twitter authentication:
 
 ```bash
 # Use memory storage
@@ -81,6 +85,7 @@ bird-tui supports the same storage configuration options as bird-cli, plus Twitt
 ```
 
 **Environment Variables:**
+
 - `AUTH_TOKEN`: Twitter auth_token cookie
 - `CT0`: Twitter ct0 cookie
 - `BIRD_DB_PATH`: Path to local database
@@ -89,14 +94,14 @@ bird-tui supports the same storage configuration options as bird-cli, plus Twitt
 
 ### Keyboard Shortcuts
 
-| Key | Action |
-|-----|--------|
-| `↑` / `↓` | Navigate tweet list up/down |
-| `←` / `→` | Previous/Next page |
-| `Tab` | Switch focus (list ↔ detail panel) |
-| `Page Up` / `Page Down` | Scroll tweet text |
-| `Ctrl+?` | Toggle help modal |
-| `q` / `Esc` | Quit |
+| Key                     | Action                             |
+| ----------------------- | ---------------------------------- |
+| `↑` / `↓`               | Navigate tweet list up/down        |
+| `←` / `→`               | Previous/Next page                 |
+| `Tab`                   | Switch focus (list ↔ detail panel) |
+| `Page Up` / `Page Down` | Scroll tweet text                  |
+| `Ctrl+?`                | Toggle help modal                  |
+| `q` / `Esc`             | Quit                               |
 
 ## Data Prerequisites
 
@@ -139,15 +144,18 @@ If no tweets are found, the TUI will display an empty state with instructions.
 ## Troubleshooting
 
 ### "No tweets found"
+
 - Have you synced tweets? Run `bird sync likes` or `bird sync bookmarks` first
 - Check that tweets are in the correct collections
 
 ### Database connection errors
+
 - Ensure your database URL is correct
 - For local SurrealDB: use `rocksdb://path/to/db`
 - Check your authentication credentials
 
 ### Terminal rendering issues
+
 - Ensure your terminal supports 256 colors
 - Try resizing the terminal window
 - Check that TERM is set correctly (e.g., `xterm-256color`)

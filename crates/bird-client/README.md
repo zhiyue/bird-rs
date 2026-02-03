@@ -9,7 +9,8 @@ Twitter/X GraphQL API client with pagination and rate limiting.
 - Cursor-based pagination
 - Rate limiting with exponential backoff
 - Cookie-based authentication
-- **Dynamic query ID discovery** - automatically recovers from Twitter's query ID rotation
+- **Dynamic query ID discovery** - automatically recovers from Twitter's query
+  ID rotation
 
 ## Usage
 
@@ -47,8 +48,8 @@ RateLimitConfig {
 }
 ```
 
-When rate limited (429), the client respects the `x-rate-limit-reset` header
-and waits until the reset time before retrying.
+When rate limited (429), the client respects the `x-rate-limit-reset` header and
+waits until the reset time before retrying.
 
 ## Query ID Discovery
 

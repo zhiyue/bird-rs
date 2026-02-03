@@ -1,10 +1,13 @@
 # Following Sync Implementation Plan
 
-This document outlines the plan to implement syncing of accounts you follow, similar to how likes and bookmarks are synced.
+This document outlines the plan to implement syncing of accounts you follow,
+similar to how likes and bookmarks are synced.
 
 ## Overview
 
-The `bird sync following` command will fetch and persist the list of Twitter accounts you follow. This differs from likes/bookmarks in that it syncs **users** rather than **tweets**.
+The `bird sync following` command will fetch and persist the list of Twitter
+accounts you follow. This differs from likes/bookmarks in that it syncs
+**users** rather than **tweets**.
 
 ## Current State
 
@@ -19,6 +22,7 @@ Tables:
 ```
 
 The `twitter_user` table currently stores:
+
 - `user_id` (primary key)
 - `username`
 - `username_lower` (indexed, for case-insensitive lookup)
@@ -28,6 +32,7 @@ The `twitter_user` table currently stores:
 ### Existing Types
 
 `TwitterUser` in `bird-core/src/types.rs` already has the full user profile:
+
 ```rust
 pub struct TwitterUser {
     pub id: String,
@@ -54,9 +59,11 @@ pub struct TwitterUser {
 
 ### Phase 1: Extend `twitter_user` Table (Non-Destructive)
 
-The existing `twitter_user` table will be extended with new nullable fields. This is safe for existing databases:
+The existing `twitter_user` table will be extended with new nullable fields.
+This is safe for existing databases:
 
 **New fields to add:**
+
 ```
 description: Option<String>
 followers_count: Option<u64>
@@ -67,13 +74,16 @@ account_created_at: Option<String>  // renamed from created_at to avoid confusio
 ```
 
 **Migration approach:**
+
 - SurrealDB is schemaless - new fields can be added without explicit migration
 - Existing records will have `NONE` for new fields (acceptable)
-- Update `init_schema()` to document expected fields (no schema enforcement needed)
+- Update `init_schema()` to document expected fields (no schema enforcement
+  needed)
 
 ### Phase 2: New `user_collection` Table
 
-Create a new association table for user collections (following, followers, etc.):
+Create a new association table for user collections (following, followers,
+etc.):
 
 ```
 user_collection:
@@ -84,6 +94,7 @@ user_collection:
 ```
 
 **Indexes:**
+
 ```sql
 DEFINE INDEX user_collection_pk ON user_collection
   FIELDS target_user_id, collection, owner_user_id UNIQUE
@@ -95,6 +106,7 @@ DEFINE INDEX user_collection_lookup ON user_collection
 ### Phase 3: Sync State Reuse
 
 The existing `sync_state` table can be reused with `collection = "following"`:
+
 - `newest_item_id` → most recently followed user ID
 - `oldest_item_id` → oldest followed user ID
 - `backfill_cursor` → pagination cursor
@@ -110,6 +122,7 @@ The existing `sync_state` table can be reused with `collection = "following"`:
 **File: `crates/bird-client/src/operations/following.rs`** (new file)
 
 Implement the GraphQL API call:
+
 - GraphQL endpoint: `Following`
 - Query ID fallback: `BEkNpEt5pNETESoqMsTEGA`
 - Variables: `userId`, `count`, `cursor`
@@ -119,6 +132,7 @@ Implement the GraphQL API call:
 **File: `crates/bird-client/src/client.rs`**
 
 Add methods:
+
 ```rust
 pub async fn get_following(
     &self,
@@ -139,6 +153,7 @@ pub async fn get_following_paginated(
 **File: `crates/bird-core/src/storage.rs`**
 
 Extend `UserStore` trait:
+
 ```rust
 /// Insert or update a full Twitter user profile.
 async fn upsert_user(&self, user: &TwitterUser) -> Result<()>;
@@ -191,11 +206,13 @@ async fn user_collection_count(
 ### 4. Sync Engine
 
 **Option A: Extend existing `SyncEngine`**
+
 - Add `Collection::Following` variant
 - Generalize sync logic to handle both tweets and users
 - More complex but maintains single sync abstraction
 
 **Option B: Create `UserSyncEngine`** (Recommended)
+
 - Separate sync engine for user collections
 - Simpler, more focused implementation
 - Parallel structure to tweet sync
@@ -220,6 +237,7 @@ impl<S: Storage> UserSyncEngine<S> {
 **File: `crates/bird-cli/src/commands/sync.rs`**
 
 Add new sync action:
+
 ```rust
 SyncAction::Following {
     #[arg(long)]
@@ -238,6 +256,7 @@ Update `run_sync()` to handle `SyncAction::Following`.
 **File: `crates/bird-core/src/types.rs`**
 
 Add user collection enum:
+
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum UserCollection {
@@ -267,6 +286,7 @@ Method: GET
 ```
 
 **Variables:**
+
 ```json
 {
   "userId": "12345",
@@ -277,6 +297,7 @@ Method: GET
 ```
 
 **Features:** (abbreviated, see TS source for full list)
+
 ```json
 {
   "rweb_video_screen_enabled": true,
@@ -291,6 +312,7 @@ Method: GET
 Path: `data.user.result.timeline.timeline.instructions`
 
 Look for entries with:
+
 - `type: "TimelineAddEntries"`
 - `content.itemContent.user_results.result` → User data
 - `content.cursorType: "Bottom"` → Next page cursor
@@ -319,38 +341,40 @@ Params: user_id, count, cursor, skip_status=true, include_user_entities=false
 
 ## File Changes Summary
 
-| File | Change Type | Description |
-|------|-------------|-------------|
-| `bird-core/src/types.rs` | Modify | Add `UserCollection` enum, `AuthorStats` struct |
-| `bird-core/src/storage.rs` | Modify | Extend `UserStore` and `TweetStore` traits |
-| `bird-client/src/operations/following.rs` | New | Following API implementation |
-| `bird-client/src/operations/mod.rs` | Modify | Export following module |
-| `bird-client/src/client.rs` | Modify | Add `get_following()` methods |
-| `bird-client/src/features.rs` | Modify | Add `following_features()` |
-| `bird-storage/src/surrealdb.rs` | Modify | Extend schema (+ `author_id` index), implement new methods |
-| `bird-core/src/user_sync_engine.rs` | New | User sync engine |
-| `bird-core/src/lib.rs` | Modify | Export user sync engine |
-| `bird-cli/src/cli.rs` | Modify | Add `SyncAction::Following`, `--author`/`--from-following` flags |
-| `bird-cli/src/commands/sync.rs` | Modify | Implement following sync command |
-| `bird-cli/src/commands/insights.rs` | Modify | Add `authors` subcommand |
+| File                                      | Change Type | Description                                                      |
+| ----------------------------------------- | ----------- | ---------------------------------------------------------------- |
+| `bird-core/src/types.rs`                  | Modify      | Add `UserCollection` enum, `AuthorStats` struct                  |
+| `bird-core/src/storage.rs`                | Modify      | Extend `UserStore` and `TweetStore` traits                       |
+| `bird-client/src/operations/following.rs` | New         | Following API implementation                                     |
+| `bird-client/src/operations/mod.rs`       | Modify      | Export following module                                          |
+| `bird-client/src/client.rs`               | Modify      | Add `get_following()` methods                                    |
+| `bird-client/src/features.rs`             | Modify      | Add `following_features()`                                       |
+| `bird-storage/src/surrealdb.rs`           | Modify      | Extend schema (+ `author_id` index), implement new methods       |
+| `bird-core/src/user_sync_engine.rs`       | New         | User sync engine                                                 |
+| `bird-core/src/lib.rs`                    | Modify      | Export user sync engine                                          |
+| `bird-cli/src/cli.rs`                     | Modify      | Add `SyncAction::Following`, `--author`/`--from-following` flags |
+| `bird-cli/src/commands/sync.rs`           | Modify      | Implement following sync command                                 |
+| `bird-cli/src/commands/insights.rs`       | Modify      | Add `authors` subcommand                                         |
 
 ---
 
 ## Risk Assessment
 
-| Risk | Mitigation |
-|------|------------|
+| Risk                                                 | Mitigation                                                   |
+| ---------------------------------------------------- | ------------------------------------------------------------ |
 | Existing DBs have `twitter_user` with limited fields | Schemaless DB - new fields are nullable, no migration needed |
-| Rate limiting on Following API | Reuse existing rate limit infrastructure |
-| Large following lists (1000s of users) | Pagination + incremental sync |
-| Query ID rotation | Reuse existing query ID refresh mechanism |
+| Rate limiting on Following API                       | Reuse existing rate limit infrastructure                     |
+| Large following lists (1000s of users)               | Pagination + incremental sync                                |
+| Query ID rotation                                    | Reuse existing query ID refresh mechanism                    |
 
 ---
 
 ## Rollback Plan
 
 If issues arise:
-1. The new `user_collection` table is isolated - can be dropped without affecting tweets
+
+1. The new `user_collection` table is isolated - can be dropped without
+   affecting tweets
 2. New fields on `twitter_user` are nullable - existing code ignores them
 3. Sync state for "following" is separate from other collections
 
@@ -358,7 +382,8 @@ If issues arise:
 
 ## Cross-Collection Queries
 
-Once following is synced, powerful cross-collection queries become possible. This enables answering questions like:
+Once following is synced, powerful cross-collection queries become possible.
+This enables answering questions like:
 
 - "How many tweets have I bookmarked from @elonmusk?"
 - "Show me liked tweets from accounts I follow"
@@ -372,11 +397,13 @@ Once following is synced, powerful cross-collection queries become possible. Thi
 DEFINE INDEX IF NOT EXISTS tweet_author_id ON tweet FIELDS author_id
 ```
 
-This is a non-destructive addition to `init_schema()`. Existing databases will build the index on first run (may take a few seconds for large datasets).
+This is a non-destructive addition to `init_schema()`. Existing databases will
+build the index on first run (may take a few seconds for large datasets).
 
 ### Example Queries
 
 **Bookmarks from a specific author:**
+
 ```sql
 SELECT * FROM tweet
 WHERE author_id = $author_id
@@ -387,6 +414,7 @@ AND tweet_id IN (
 ```
 
 **Tweets from accounts I follow (any collection):**
+
 ```sql
 LET $following_ids = (
     SELECT target_user_id FROM user_collection
@@ -402,6 +430,7 @@ AND tweet_id IN (
 ```
 
 **Author engagement stats:**
+
 ```sql
 SELECT
     author_id,
@@ -448,6 +477,7 @@ async fn get_tweets_from_following(
 ```
 
 **New type:**
+
 ```rust
 pub struct AuthorStats {
     pub author_id: String,
@@ -479,16 +509,16 @@ bird insights authors
 
 ## Estimated Effort
 
-| Task | Complexity |
-|------|-----------|
-| API client implementation | Medium |
-| Storage trait extension | Low |
-| SurrealDB implementation | Medium |
-| User sync engine | Medium |
-| CLI integration | Low |
-| Cross-collection queries | Medium |
-| Author stats & insights | Low |
-| Testing | Medium |
+| Task                      | Complexity |
+| ------------------------- | ---------- |
+| API client implementation | Medium     |
+| Storage trait extension   | Low        |
+| SurrealDB implementation  | Medium     |
+| User sync engine          | Medium     |
+| CLI integration           | Low        |
+| Cross-collection queries  | Medium     |
+| Author stats & insights   | Low        |
+| Testing                   | Medium     |
 
 **Total:** ~3-4 days of focused work
 
@@ -497,14 +527,17 @@ bird insights authors
 ## Implementation Phases
 
 **Phase 1: Core Following Sync** (MVP)
+
 - API client, storage, sync engine, basic CLI
 - Enables `bird sync following`
 
 **Phase 2: Cross-Collection Queries**
+
 - Add `author_id` index
 - Implement `--author` and `--from-following` filters
 - Add `AuthorStats` queries
 
 **Phase 3: Insights Integration**
+
 - `bird insights authors` command
 - Integration with existing resonance scoring

@@ -4,10 +4,10 @@ Storage backends for bird. Implements the storage traits from [bird-core].
 
 ## Backends
 
-| Backend            | Description                                   |
-| ------------------ | --------------------------------------------- |
+| Backend            | Description                                            |
+| ------------------ | ------------------------------------------------------ |
 | `SurrealDbStorage` | Persistent storage using [SurrealDB] (local or remote) |
-| `MemoryStorage`    | In-memory storage for testing                 |
+| `MemoryStorage`    | In-memory storage for testing                          |
 
 ## Usage
 
@@ -91,7 +91,8 @@ let storage = MemoryStorage::new();
 
 ## StorageConfig
 
-For higher-level callers, you can build a config and create a backend dynamically:
+For higher-level callers, you can build a config and create a backend
+dynamically:
 
 ```rust
 use bird_storage::{StorageConfig, SurrealDbConfig, create_storage};

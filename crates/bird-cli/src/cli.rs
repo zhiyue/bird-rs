@@ -245,6 +245,29 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum SyncAction {
+    /// Sync all collections (likes, bookmarks, posts) in one command.
+    All {
+        /// Full re-sync (ignore previous sync state).
+        #[arg(long)]
+        full: bool,
+
+        /// Maximum number of pages to fetch per collection (default: 10).
+        #[arg(long)]
+        max_pages: Option<u32>,
+
+        /// Delay per tweet in ms (simulates reading speed, default: 2250 = 2.25s/tweet).
+        #[arg(long)]
+        delay: Option<u64>,
+
+        /// Skip backfill, only fetch new items.
+        #[arg(long)]
+        no_backfill: bool,
+
+        /// Maximum storage size before stopping sync (e.g., "5GB", "500MB").
+        #[arg(long)]
+        max_storage: Option<String>,
+    },
+
     /// Sync liked tweets to database.
     Likes {
         /// Full re-sync (ignore previous sync state).
@@ -458,6 +481,24 @@ impl Cli {
                 .await
             }
             Some(Commands::Sync { action }) => match action {
+                SyncAction::All {
+                    full,
+                    max_pages,
+                    delay,
+                    no_backfill,
+                    max_storage,
+                } => {
+                    sync::run_sync_all(
+                        &self,
+                        *full,
+                        *max_pages,
+                        *delay,
+                        *no_backfill,
+                        max_storage.clone(),
+                        show_emoji,
+                    )
+                    .await
+                }
                 SyncAction::Likes {
                     full,
                     max_pages,

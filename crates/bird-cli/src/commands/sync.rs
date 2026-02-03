@@ -17,6 +17,86 @@ fn get_storage_endpoint(config: &StorageConfig) -> Option<String> {
     }
 }
 
+/// Run the sync all command - syncs likes, bookmarks, and posts in sequence.
+pub async fn run_sync_all(
+    cli: &Cli,
+    full: bool,
+    max_pages: Option<u32>,
+    delay_ms: Option<u64>,
+    no_backfill: bool,
+    max_storage: Option<String>,
+    show_emoji: bool,
+) -> anyhow::Result<()> {
+    let collections = [Collection::Likes, Collection::Bookmarks, Collection::UserTweets];
+    let total = collections.len();
+
+    let icon = if show_emoji { "🚀 " } else { "" };
+    println!(
+        "{}Syncing all collections ({} total)...",
+        icon,
+        total.to_string().bold()
+    );
+    println!();
+
+    let mut total_new = 0usize;
+    let mut total_fetched = 0usize;
+
+    for (i, collection) in collections.iter().enumerate() {
+        let progress_icon = if show_emoji { "📦 " } else { "" };
+        println!(
+            "{}[{}/{}] Starting {} sync...",
+            progress_icon,
+            i + 1,
+            total,
+            collection.as_str().bold()
+        );
+
+        // Run sync for this collection
+        let result = run_sync_internal(
+            cli,
+            *collection,
+            full,
+            max_pages,
+            delay_ms,
+            no_backfill,
+            max_storage.clone(),
+            show_emoji,
+        )
+        .await?;
+
+        // Output result for this collection
+        output_sync_result(cli, collection, &result, show_emoji);
+
+        total_new += result.new_tweets;
+        total_fetched += result.total_fetched;
+
+        // If we hit storage limit, stop syncing further collections
+        if result.stopped_at_storage_limit {
+            let warn = if show_emoji { "⚠️  " } else { "" };
+            println!(
+                "{}Storage limit reached during {} sync - stopping all syncs",
+                warn.yellow(),
+                collection.as_str()
+            );
+            break;
+        }
+
+        println!();
+    }
+
+    // Summary
+    println!();
+    let check = if show_emoji { "✅ " } else { "" };
+    println!(
+        "{}All syncs complete: {} new tweets stored ({} total fetched)",
+        check.green(),
+        total_new.to_string().green().bold(),
+        total_fetched
+    );
+
+    Ok(())
+}
+
 /// Run the sync likes command.
 pub async fn run_sync_likes(
     cli: &Cli,
@@ -162,7 +242,7 @@ pub async fn run_backfill(
     Ok(())
 }
 
-/// Run sync for a specific collection.
+/// Run sync for a specific collection (with output).
 #[allow(clippy::too_many_arguments)]
 async fn run_sync(
     cli: &Cli,
@@ -174,6 +254,36 @@ async fn run_sync(
     max_storage: Option<String>,
     show_emoji: bool,
 ) -> anyhow::Result<()> {
+    let result = run_sync_internal(
+        cli,
+        collection,
+        full,
+        max_pages,
+        delay_ms,
+        no_backfill,
+        max_storage,
+        show_emoji,
+    )
+    .await?;
+
+    // Output results
+    output_sync_result(cli, &collection, &result, show_emoji);
+
+    Ok(())
+}
+
+/// Run sync for a specific collection (internal, returns result).
+#[allow(clippy::too_many_arguments)]
+async fn run_sync_internal(
+    cli: &Cli,
+    collection: Collection,
+    full: bool,
+    max_pages: Option<u32>,
+    delay_ms: Option<u64>,
+    no_backfill: bool,
+    max_storage: Option<String>,
+    show_emoji: bool,
+) -> anyhow::Result<crate::sync_engine::SyncResult> {
     let mut client = cli.create_client()?;
     let storage = cli.create_storage().await?;
     let db_config = cli.storage_config()?;
@@ -235,10 +345,7 @@ async fn run_sync(
         .sync_collection(collection, &user_id, &options)
         .await?;
 
-    // Output results
-    output_sync_result(cli, &collection, &result, show_emoji);
-
-    Ok(())
+    Ok(result)
 }
 
 /// Parse max storage string to bytes.

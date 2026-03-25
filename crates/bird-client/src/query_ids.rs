@@ -239,7 +239,7 @@ impl QueryIdManager {
         Ok(all_ids)
     }
 
-    /// Find JS bundle URLs from discovery pages.
+    /// Find JS bundle URLs from discovery pages, including lazy-loaded chunks.
     async fn find_bundle_urls(&self) -> Result<Vec<String>, QueryIdError> {
         let bundle_pattern = Regex::new(
             r#"https://abs\.twimg\.com/responsive-web/client-web(?:-legacy)?/[A-Za-z0-9._-]+\.js"#,
@@ -261,13 +261,72 @@ impl QueryIdManager {
                 }
             }
 
-            // Limit to reasonable number of bundles
+            // Discover lazy-loaded chunk URLs from webpack chunk mapping in HTML/runtime.
+            // Pattern: chunk names like "shared~bundle.BookmarkFolders~bundle.Bookmarks"
+            // with their hashes in the webpack runtime code.
+            let lazy_urls = Self::discover_lazy_chunk_urls(&html);
+            for url in lazy_urls {
+                if !bundle_urls.contains(&url) {
+                    bundle_urls.push(url);
+                }
+            }
+
             if bundle_urls.len() >= 50 {
                 break;
             }
         }
 
         Ok(bundle_urls)
+    }
+
+    /// Discover lazy-loaded chunk URLs from webpack chunk mapping in page HTML.
+    /// Extracts chunk name → hash mapping and builds URLs for bookmark-related chunks.
+    fn discover_lazy_chunk_urls(html: &str) -> Vec<String> {
+        let mut urls = Vec::new();
+
+        // Target chunks that contain query IDs for operations we care about
+        let target_chunks = [
+            "bundle.BookmarkFolders~bundle.Bookmarks",
+            "bundle.Bookmarks",
+        ];
+
+        // Find chunk name → ID mapping: e.g. 83988:"shared~bundle.BookmarkFolders~bundle.Bookmarks"
+        let chunk_name_pattern = Regex::new(
+            r#"(\d+):"((?:shared~)?(?:bundle\.Bookmark[A-Za-z~.]*))""#,
+        )
+        .unwrap();
+
+        // Find chunk ID → hash mapping: e.g. 83988:"eb51986"
+        // This appears in the webpack runtime as part of the chunk hash mapping object
+        let mut chunk_ids: Vec<(String, String)> = Vec::new(); // (id, chunk_name)
+
+        for cap in chunk_name_pattern.captures_iter(html) {
+            let id = cap.get(1).unwrap().as_str().to_string();
+            let name = cap.get(2).unwrap().as_str().to_string();
+            if target_chunks.iter().any(|t| name.contains(t)) {
+                chunk_ids.push((id, name));
+            }
+        }
+
+        // Now find hashes for these chunk IDs
+        for (id, name) in &chunk_ids {
+            // Pattern: the hash appears in the webpack runtime like: 83988:"eb51986"
+            let hash_pattern = format!(r#"{}:"([a-f0-9]{{7}})""#, id);
+            if let Ok(re) = Regex::new(&hash_pattern) {
+                // Find all matches and use the last one (hash mapping comes after name mapping)
+                let matches: Vec<_> = re.captures_iter(html).collect();
+                if let Some(cap) = matches.last() {
+                    let hash = cap.get(1).unwrap().as_str();
+                    let url = format!(
+                        "https://abs.twimg.com/responsive-web/client-web/{}.{}a.js",
+                        name, hash
+                    );
+                    urls.push(url);
+                }
+            }
+        }
+
+        urls
     }
 
     /// Extract query IDs from a single JS bundle.

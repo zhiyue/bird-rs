@@ -671,9 +671,13 @@ impl TwitterClient {
                 }
             }
 
-            // Rate limit: delay based on tweets from previous page (skip on first page)
-            if pages_fetched > 0 && rate_limit.delay_per_tweet_ms > 0 && last_page_tweet_count > 0 {
-                let delay_ms = last_page_tweet_count as u64 * rate_limit.delay_per_tweet_ms;
+            // Rate limit: random delay between pages to avoid detection
+            // Range: 1-5 seconds per page (randomized)
+            if pages_fetched > 0 && rate_limit.delay_per_tweet_ms > 0 {
+                let delay_ms: u64 = {
+                    let bytes: [u8; 8] = rand::random();
+                    1000 + (u64::from_le_bytes(bytes) % 4001) // 1000..=5000 ms
+                };
                 sleep(Duration::from_millis(delay_ms)).await;
             }
 

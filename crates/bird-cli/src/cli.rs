@@ -1,6 +1,6 @@
 //! CLI interface for bird.
 
-use crate::commands::{bookmarks, config, db, insights, likes, list, read, sync, whoami};
+use crate::commands::{bookmarks, config, db, export, insights, likes, list, read, sync, whoami};
 use bird_client::cookies::{check_available_sources, resolve_credentials};
 use bird_client::{Collection, TwitterClient, TwitterClientOptions};
 use bird_storage::{
@@ -241,6 +241,26 @@ enum Commands {
         #[command(subcommand)]
         action: InsightsAction,
     },
+
+    /// Export tweets from a collection to a file.
+    Export {
+        /// Collection to export (bookmarks, likes, user_tweets).
+        collection: String,
+
+        /// Output format: jsonl (default), json, or md.
+        #[arg(long, default_value = "jsonl")]
+        format: String,
+
+        /// Output file path. Defaults to ~/.bird/exports/<collection>.<ext>.
+        #[arg(long)]
+        output: Option<String>,
+
+        /// Group output files by time period: day or month.
+        /// When set, exports to ~/.bird/exports/<collection>/<YYYY-MM-DD>.<ext> (day)
+        /// or ~/.bird/exports/<collection>/<YYYY-MM>.<ext> (month).
+        #[arg(long)]
+        group_by: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -266,6 +286,14 @@ enum SyncAction {
         /// Maximum storage size before stopping sync (e.g., "5GB", "500MB").
         #[arg(long)]
         max_storage: Option<String>,
+
+        /// Auto-export tweets to JSONL files during sync (~/.bird/exports/<collection>.jsonl).
+        #[arg(long)]
+        auto_export: bool,
+
+        /// Group auto-exported files by time period: day or month.
+        #[arg(long)]
+        group_by: Option<String>,
     },
 
     /// Sync liked tweets to database.
@@ -289,6 +317,14 @@ enum SyncAction {
         /// Maximum storage size before stopping sync (e.g., "5GB", "500MB").
         #[arg(long)]
         max_storage: Option<String>,
+
+        /// Auto-export tweets to JSONL file during sync (~/.bird/exports/likes.jsonl).
+        #[arg(long)]
+        auto_export: bool,
+
+        /// Group auto-exported files by time period: day or month.
+        #[arg(long)]
+        group_by: Option<String>,
     },
 
     /// Sync bookmarked tweets to database.
@@ -312,6 +348,14 @@ enum SyncAction {
         /// Maximum storage size before stopping sync (e.g., "5GB", "500MB").
         #[arg(long)]
         max_storage: Option<String>,
+
+        /// Auto-export tweets to JSONL file during sync (~/.bird/exports/bookmarks.jsonl).
+        #[arg(long)]
+        auto_export: bool,
+
+        /// Group auto-exported files by time period: day or month.
+        #[arg(long)]
+        group_by: Option<String>,
     },
 
     /// Sync your own tweets/posts to database.
@@ -335,6 +379,14 @@ enum SyncAction {
         /// Maximum storage size before stopping sync (e.g., "5GB", "500MB").
         #[arg(long)]
         max_storage: Option<String>,
+
+        /// Auto-export tweets to JSONL file during sync (~/.bird/exports/user_tweets.jsonl).
+        #[arg(long)]
+        auto_export: bool,
+
+        /// Group auto-exported files by time period: day or month.
+        #[arg(long)]
+        group_by: Option<String>,
     },
 
     /// Continue backfilling older tweets.
@@ -487,6 +539,8 @@ impl Cli {
                     delay,
                     no_backfill,
                     max_storage,
+                    auto_export,
+                    group_by,
                 } => {
                     sync::run_sync_all(
                         &self,
@@ -495,6 +549,8 @@ impl Cli {
                         *delay,
                         *no_backfill,
                         max_storage.clone(),
+                        *auto_export,
+                        group_by.as_deref(),
                         show_emoji,
                     )
                     .await
@@ -505,6 +561,8 @@ impl Cli {
                     delay,
                     no_backfill,
                     max_storage,
+                    auto_export,
+                    group_by,
                 } => {
                     sync::run_sync_likes(
                         &self,
@@ -513,6 +571,8 @@ impl Cli {
                         *delay,
                         *no_backfill,
                         max_storage.clone(),
+                        *auto_export,
+                        group_by.as_deref(),
                         show_emoji,
                     )
                     .await
@@ -523,6 +583,8 @@ impl Cli {
                     delay,
                     no_backfill,
                     max_storage,
+                    auto_export,
+                    group_by,
                 } => {
                     sync::run_sync_bookmarks(
                         &self,
@@ -531,6 +593,8 @@ impl Cli {
                         *delay,
                         *no_backfill,
                         max_storage.clone(),
+                        *auto_export,
+                        group_by.as_deref(),
                         show_emoji,
                     )
                     .await
@@ -541,6 +605,8 @@ impl Cli {
                     delay,
                     no_backfill,
                     max_storage,
+                    auto_export,
+                    group_by,
                 } => {
                     sync::run_sync_posts(
                         &self,
@@ -549,6 +615,8 @@ impl Cli {
                         *delay,
                         *no_backfill,
                         max_storage.clone(),
+                        *auto_export,
+                        group_by.as_deref(),
                         show_emoji,
                     )
                     .await
@@ -597,6 +665,12 @@ impl Cli {
             Some(Commands::Config { action }) => match action {
                 ConfigAction::Init { force } => config::run_init(&self, *force, show_emoji).await,
             },
+            Some(Commands::Export {
+                collection,
+                format,
+                output,
+                group_by,
+            }) => export::run(&self, collection, format, output.as_deref(), group_by.as_deref()).await,
             Some(Commands::Insights { action }) => match action {
                 InsightsAction::Generate {
                     period,

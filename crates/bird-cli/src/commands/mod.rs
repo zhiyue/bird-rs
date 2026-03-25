@@ -3,6 +3,7 @@
 pub mod bookmarks;
 pub mod config;
 pub mod db;
+pub mod export;
 pub mod insights;
 pub mod likes;
 pub mod list;

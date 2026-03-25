@@ -3,7 +3,7 @@
 use crate::cli::Cli;
 use crate::output::format_json;
 use crate::storage_monitor::{format_bytes, parse_size, StorageMonitor};
-use crate::sync_engine::{SyncEngine, SyncOptions, SyncProgress};
+use crate::sync_engine::{AutoExportConfig, AutoExportGroupBy, SyncEngine, SyncOptions, SyncProgress};
 use bird_client::{Collection, CurrentUserResult, RateLimitConfig};
 use bird_storage::StorageConfig;
 use chrono::Utc;
@@ -25,6 +25,8 @@ pub async fn run_sync_all(
     delay_ms: Option<u64>,
     no_backfill: bool,
     max_storage: Option<String>,
+    auto_export: bool,
+    group_by: Option<&str>,
     show_emoji: bool,
 ) -> anyhow::Result<()> {
     let collections = [
@@ -64,6 +66,8 @@ pub async fn run_sync_all(
             delay_ms,
             no_backfill,
             max_storage.clone(),
+            auto_export,
+            group_by,
             show_emoji,
         )
         .await?;
@@ -109,6 +113,8 @@ pub async fn run_sync_likes(
     delay_ms: Option<u64>,
     no_backfill: bool,
     max_storage: Option<String>,
+    auto_export: bool,
+    group_by: Option<&str>,
     show_emoji: bool,
 ) -> anyhow::Result<()> {
     run_sync(
@@ -119,6 +125,8 @@ pub async fn run_sync_likes(
         delay_ms,
         no_backfill,
         max_storage,
+        auto_export,
+        group_by,
         show_emoji,
     )
     .await
@@ -132,6 +140,8 @@ pub async fn run_sync_bookmarks(
     delay_ms: Option<u64>,
     no_backfill: bool,
     max_storage: Option<String>,
+    auto_export: bool,
+    group_by: Option<&str>,
     show_emoji: bool,
 ) -> anyhow::Result<()> {
     run_sync(
@@ -142,6 +152,8 @@ pub async fn run_sync_bookmarks(
         delay_ms,
         no_backfill,
         max_storage,
+        auto_export,
+        group_by,
         show_emoji,
     )
     .await
@@ -155,6 +167,8 @@ pub async fn run_sync_posts(
     delay_ms: Option<u64>,
     no_backfill: bool,
     max_storage: Option<String>,
+    auto_export: bool,
+    group_by: Option<&str>,
     show_emoji: bool,
 ) -> anyhow::Result<()> {
     run_sync(
@@ -165,6 +179,8 @@ pub async fn run_sync_posts(
         delay_ms,
         no_backfill,
         max_storage,
+        auto_export,
+        group_by,
         show_emoji,
     )
     .await
@@ -225,11 +241,12 @@ pub async fn run_backfill(
     // Build sync options with storage monitor and progress callback
     let options = SyncOptions {
         full: false,
-        max_pages: max_pages.or(Some(10)), // Conservative default
+        max_pages: max_pages.or(Some(10)),
         no_backfill: false,
         rate_limit,
         storage_monitor: Some(storage_monitor),
         on_progress: Some(create_progress_callback(show_emoji)),
+        auto_export: None,
     };
 
     // Create sync engine
@@ -256,6 +273,8 @@ async fn run_sync(
     delay_ms: Option<u64>,
     no_backfill: bool,
     max_storage: Option<String>,
+    auto_export: bool,
+    group_by: Option<&str>,
     show_emoji: bool,
 ) -> anyhow::Result<()> {
     let result = run_sync_internal(
@@ -266,6 +285,8 @@ async fn run_sync(
         delay_ms,
         no_backfill,
         max_storage,
+        auto_export,
+        group_by,
         show_emoji,
     )
     .await?;
@@ -286,6 +307,8 @@ async fn run_sync_internal(
     delay_ms: Option<u64>,
     no_backfill: bool,
     max_storage: Option<String>,
+    auto_export: bool,
+    group_by: Option<&str>,
     show_emoji: bool,
 ) -> anyhow::Result<crate::sync_engine::SyncResult> {
     let mut client = cli.create_client()?;
@@ -331,14 +354,45 @@ async fn run_sync_internal(
         None => RateLimitConfig::default(),
     };
 
+    // Build auto-export config if enabled
+    let auto_export_config = if auto_export {
+        let export_base = dirs::home_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(".bird")
+            .join("exports");
+
+        match group_by {
+            Some(g) => {
+                let group = match g.to_lowercase().as_str() {
+                    "day" | "daily" => AutoExportGroupBy::Day,
+                    "month" | "monthly" => AutoExportGroupBy::Month,
+                    _ => anyhow::bail!("Unknown group-by '{}'. Use: day or month", g),
+                };
+                Some(AutoExportConfig::Grouped {
+                    base_dir: export_base.join(collection.as_str()),
+                    group_by: group,
+                })
+            }
+            None => Some(AutoExportConfig::SingleFile(
+                export_base.join(format!("{}.jsonl", collection.as_str())),
+            )),
+        }
+    } else {
+        if group_by.is_some() {
+            anyhow::bail!("--group-by requires --auto-export to be enabled");
+        }
+        None
+    };
+
     // Build sync options with storage monitor and progress callback
     let options = SyncOptions {
         full,
-        max_pages: max_pages.or(Some(10)), // Conservative default
+        max_pages: max_pages.or(Some(10)),
         no_backfill,
         rate_limit,
         storage_monitor: Some(storage_monitor),
         on_progress: Some(create_progress_callback(show_emoji)),
+        auto_export: auto_export_config,
     };
 
     // Create sync engine

@@ -34,7 +34,7 @@ thiserror = "2"
 anyhow = "1"
 
 # HTTP client
-reqwest = { version = "0.12", features = ["json", "cookies"] }
+reqwest = { version = "0.12", features = ["json", "cookies", "gzip", "brotli"] }
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }

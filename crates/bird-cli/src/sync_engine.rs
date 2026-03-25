@@ -80,6 +80,25 @@ pub struct SyncProgress {
     pub max_storage_bytes: Option<u64>,
 }
 
+/// Auto-export configuration for sync.
+#[derive(Clone)]
+pub enum AutoExportConfig {
+    /// Export all tweets to a single JSONL file.
+    SingleFile(std::path::PathBuf),
+    /// Export tweets grouped by day/month into separate JSONL files.
+    Grouped {
+        base_dir: std::path::PathBuf,
+        group_by: AutoExportGroupBy,
+    },
+}
+
+/// Grouping mode for auto-export during sync.
+#[derive(Clone, Copy)]
+pub enum AutoExportGroupBy {
+    Day,
+    Month,
+}
+
 /// Options for sync operation.
 pub struct SyncOptions {
     /// Full re-sync (ignore previous sync state).
@@ -94,17 +113,20 @@ pub struct SyncOptions {
     pub storage_monitor: Option<StorageMonitor>,
     /// Progress callback for real-time updates.
     pub on_progress: Option<ProgressCallback>,
+    /// Auto-export configuration.
+    pub auto_export: Option<AutoExportConfig>,
 }
 
 impl Default for SyncOptions {
     fn default() -> Self {
         Self {
             full: false,
-            max_pages: Some(10), // Conservative default
+            max_pages: Some(10), // Pages per batch; auto-backfill handles fetching all
             no_backfill: false,
             rate_limit: RateLimitConfig::default(),
             storage_monitor: None,
             on_progress: None,
+            auto_export: None,
         }
     }
 }
@@ -149,6 +171,55 @@ impl SyncEngine {
                 max_storage_bytes: options.storage_monitor.as_ref().and_then(|m| m.max_bytes()),
             };
             callback(&progress);
+        }
+    }
+
+    /// Append tweets to JSONL file(s) if auto-export is enabled.
+    fn auto_export_tweets(
+        &self,
+        options: &SyncOptions,
+        tweets: &[bird_client::TweetData],
+    ) {
+        let config = match &options.auto_export {
+            Some(c) => c,
+            None => return,
+        };
+
+        match config {
+            AutoExportConfig::SingleFile(path) => {
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if let Ok(mut file) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                {
+                    use std::io::Write;
+                    for tweet in tweets {
+                        if let Ok(line) = serde_json::to_string(tweet) {
+                            let _ = writeln!(file, "{}", line);
+                        }
+                    }
+                }
+            }
+            AutoExportConfig::Grouped { base_dir, group_by } => {
+                use std::io::Write;
+                let _ = std::fs::create_dir_all(base_dir);
+                for tweet in tweets {
+                    let key = extract_group_key_for_sync(&tweet.created_at, *group_by);
+                    let file_path = base_dir.join(format!("{}.jsonl", key));
+                    if let Ok(mut file) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&file_path)
+                    {
+                        if let Ok(line) = serde_json::to_string(tweet) {
+                            let _ = writeln!(file, "{}", line);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -205,17 +276,66 @@ impl SyncEngine {
             SyncDirection::Full
         };
 
-        match direction {
-            SyncDirection::Full => self.do_full_sync(collection, user_id, options).await,
+        let mut result = match direction {
+            SyncDirection::Full => self.do_full_sync(collection, user_id, options).await?,
             SyncDirection::Forward => {
                 self.do_forward_sync(collection, user_id, options, sync_state.unwrap())
-                    .await
+                    .await?
             }
             SyncDirection::Backfill => {
                 self.do_backfill_sync(collection, user_id, options, sync_state.unwrap())
-                    .await
+                    .await?
+            }
+        };
+
+        // Auto-backfill: keep fetching older items in batches until all history is synced.
+        // Each batch is limited to BACKFILL_BATCH_PAGES pages so progress is reported between batches.
+        const BACKFILL_BATCH_PAGES: u32 = 10;
+        if !options.no_backfill && result.has_more_history && !result.stopped_at_storage_limit {
+            // Use batched options so each round fetches a limited number of pages
+            let batch_options = SyncOptions {
+                max_pages: Some(BACKFILL_BATCH_PAGES),
+                full: options.full,
+                no_backfill: options.no_backfill,
+                rate_limit: options.rate_limit.clone(),
+                storage_monitor: options.storage_monitor.clone(),
+                on_progress: None, // We'll report progress ourselves below
+                auto_export: options.auto_export.clone(),
+            };
+
+            loop {
+                let state = self
+                    .storage
+                    .get_sync_state(collection.as_str(), user_id)
+                    .await?;
+
+                match state {
+                    Some(s) if s.has_more_history => {
+                        let backfill_result = self
+                            .do_backfill_sync(collection, user_id, &batch_options, s)
+                            .await?;
+
+                        result.new_tweets += backfill_result.new_tweets;
+                        result.total_fetched += backfill_result.total_fetched;
+                        result.has_more_history = backfill_result.has_more_history;
+                        result.stopped_at_storage_limit = backfill_result.stopped_at_storage_limit;
+                        result.final_storage_bytes = backfill_result.final_storage_bytes;
+
+                        // Report cumulative progress after each batch
+                        self.report_progress(options, result.total_fetched, result.new_tweets);
+
+                        if !backfill_result.has_more_history
+                            || backfill_result.stopped_at_storage_limit
+                        {
+                            break;
+                        }
+                    }
+                    _ => break,
+                }
             }
         }
+
+        Ok(result)
     }
 
     /// Perform a full sync (first sync or --full flag).
@@ -248,6 +368,9 @@ impl SyncEngine {
                 .add_to_collection(&tweet.id, collection.as_str(), user_id)
                 .await?;
         }
+
+        // Auto-export to JSONL if enabled
+        self.auto_export_tweets(options, &result.items);
 
         // Report progress after storing
         self.report_progress(options, total_fetched, new_count);
@@ -321,6 +444,9 @@ impl SyncEngine {
                 .await?;
         }
 
+        // Auto-export to JSONL if enabled
+        self.auto_export_tweets(options, &result.items);
+
         // Report progress after storing
         self.report_progress(options, total_fetched, new_count);
 
@@ -384,6 +510,9 @@ impl SyncEngine {
                 .add_to_collection(&tweet.id, collection.as_str(), user_id)
                 .await?;
         }
+
+        // Auto-export to JSONL if enabled
+        self.auto_export_tweets(options, &result.items);
 
         // Report progress after storing
         self.report_progress(options, total_fetched, new_count);
@@ -504,4 +633,19 @@ fn apply_rate_limit_info(state: &mut bird_client::SyncState, rate_limit: &RateLi
         state.last_rate_limit_backoff_ms = info.last_backoff_ms;
         state.last_rate_limit_retries = info.last_retries;
     }
+}
+
+/// Extract a grouping key from a tweet's created_at for auto-export.
+fn extract_group_key_for_sync(created_at: &Option<String>, group_by: AutoExportGroupBy) -> String {
+    if let Some(ts) = created_at.as_ref() {
+        // Twitter format: "Wed Oct 10 20:19:24 +0000 2018"
+        if let Ok(dt) = chrono::DateTime::parse_from_str(ts, "%a %b %d %H:%M:%S %z %Y") {
+            let date = dt.date_naive();
+            return match group_by {
+                AutoExportGroupBy::Day => date.format("%Y-%m-%d").to_string(),
+                AutoExportGroupBy::Month => date.format("%Y-%m").to_string(),
+            };
+        }
+    }
+    "unknown".to_string()
 }

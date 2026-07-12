@@ -3,11 +3,15 @@
 use crate::cli::Cli;
 use crate::output::format_json;
 use crate::storage_monitor::{format_bytes, parse_size, StorageMonitor};
-use crate::sync_engine::{AutoExportConfig, AutoExportGroupBy, SyncEngine, SyncOptions, SyncProgress};
-use bird_client::{Collection, CurrentUserResult, RateLimitConfig};
+use crate::sync_engine::{
+    AutoExportConfig, AutoExportGroupBy, SyncEngine, SyncOptions, SyncProgress,
+    DEFAULT_SYNC_MAX_PAGES,
+};
+use bird_client::{Collection, CurrentUserResult, RateLimitConfig, TwitterClient};
 use bird_storage::StorageConfig;
 use chrono::Utc;
 use colored::Colorize;
+use std::sync::Mutex;
 
 /// Get endpoint string from StorageConfig for monitoring.
 fn get_storage_endpoint(config: &StorageConfig) -> Option<String> {
@@ -18,6 +22,7 @@ fn get_storage_endpoint(config: &StorageConfig) -> Option<String> {
 }
 
 /// Run the sync all command - syncs likes, bookmarks, and posts in sequence.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_sync_all(
     cli: &Cli,
     full: bool,
@@ -46,6 +51,7 @@ pub async fn run_sync_all(
 
     let mut total_new = 0usize;
     let mut total_fetched = 0usize;
+    let mut failures = Vec::new();
 
     for (i, collection) in collections.iter().enumerate() {
         let progress_icon = if show_emoji { "📦 " } else { "" };
@@ -58,7 +64,7 @@ pub async fn run_sync_all(
         );
 
         // Run sync for this collection
-        let result = run_sync_internal(
+        let result = match run_sync_internal(
             cli,
             *collection,
             full,
@@ -70,7 +76,22 @@ pub async fn run_sync_all(
             group_by,
             show_emoji,
         )
-        .await?;
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                let warn = if show_emoji { "⚠️  " } else { "" };
+                eprintln!(
+                    "{}{} sync failed: {}",
+                    warn.yellow(),
+                    collection.as_str(),
+                    error
+                );
+                failures.push(format!("{}: {}", collection.as_str(), error));
+                println!();
+                continue;
+            }
+        };
 
         // Output result for this collection
         output_sync_result(cli, collection, &result, show_emoji);
@@ -95,17 +116,27 @@ pub async fn run_sync_all(
     // Summary
     println!();
     let check = if show_emoji { "✅ " } else { "" };
-    println!(
-        "{}All syncs complete: {} new tweets stored ({} total fetched)",
-        check.green(),
-        total_new.to_string().green().bold(),
-        total_fetched
-    );
-
-    Ok(())
+    if failures.is_empty() {
+        println!(
+            "{}All syncs complete: {} new tweets stored ({} total fetched)",
+            check.green(),
+            total_new.to_string().green().bold(),
+            total_fetched
+        );
+        Ok(())
+    } else {
+        println!(
+            "Sync finished with {} failed collection(s): {} new tweets stored ({} total fetched)",
+            failures.len(),
+            total_new.to_string().green().bold(),
+            total_fetched
+        );
+        anyhow::bail!(failures.join("; "))
+    }
 }
 
 /// Run the sync likes command.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_sync_likes(
     cli: &Cli,
     full: bool,
@@ -133,6 +164,7 @@ pub async fn run_sync_likes(
 }
 
 /// Run the sync bookmarks command.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_sync_bookmarks(
     cli: &Cli,
     full: bool,
@@ -160,6 +192,7 @@ pub async fn run_sync_bookmarks(
 }
 
 /// Run the sync posts command.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_sync_posts(
     cli: &Cli,
     full: bool,
@@ -206,6 +239,7 @@ pub async fn run_backfill(
             anyhow::bail!("Failed to get current user: {}", e);
         }
     };
+    enable_fetch_progress(&mut client, show_emoji);
 
     // Parse max storage limit
     let max_storage_bytes = parse_max_storage(&max_storage)?;
@@ -241,7 +275,7 @@ pub async fn run_backfill(
     // Build sync options with storage monitor and progress callback
     let options = SyncOptions {
         full: false,
-        max_pages: max_pages.or(Some(10)),
+        max_pages: max_pages.or(Some(DEFAULT_SYNC_MAX_PAGES)),
         no_backfill: false,
         rate_limit,
         storage_monitor: Some(storage_monitor),
@@ -322,6 +356,7 @@ async fn run_sync_internal(
             anyhow::bail!("Failed to get current user: {}", e);
         }
     };
+    enable_fetch_progress(&mut client, show_emoji);
 
     // Parse max storage limit
     let max_storage_bytes = parse_max_storage(&max_storage)?;
@@ -387,7 +422,7 @@ async fn run_sync_internal(
     // Build sync options with storage monitor and progress callback
     let options = SyncOptions {
         full,
-        max_pages: max_pages.or(Some(10)),
+        max_pages: max_pages.or(Some(DEFAULT_SYNC_MAX_PAGES)),
         no_backfill,
         rate_limit,
         storage_monitor: Some(storage_monitor),
@@ -439,6 +474,44 @@ fn create_progress_callback(show_emoji: bool) -> Box<dyn Fn(&SyncProgress) + Sen
     })
 }
 
+#[derive(Default)]
+struct FetchProgressTotals {
+    completed_pages: u32,
+    completed_items: usize,
+    current_pages: u32,
+    current_items: usize,
+}
+
+impl FetchProgressTotals {
+    fn update(&mut self, pages: u32, items: usize) -> (u32, usize) {
+        if self.current_pages > 0 && pages <= self.current_pages {
+            self.completed_pages += self.current_pages;
+            self.completed_items += self.current_items;
+        }
+        self.current_pages = pages;
+        self.current_items = items;
+        (self.completed_pages + pages, self.completed_items + items)
+    }
+}
+
+fn enable_fetch_progress(client: &mut TwitterClient, show_emoji: bool) {
+    let totals = Mutex::new(FetchProgressTotals::default());
+    client.set_pagination_progress_callback(move |pages, items| {
+        let mut totals = totals.lock().unwrap_or_else(|error| error.into_inner());
+        let (total_pages, total_items) = totals.update(pages, items);
+
+        let icon = if show_emoji { "📥 " } else { "" };
+        let page_label = if total_pages == 1 { "page" } else { "pages" };
+        eprintln!(
+            "{}Scanned: {} items across {} {}",
+            icon,
+            total_items.to_string().green(),
+            total_pages.to_string().green(),
+            page_label
+        );
+    });
+}
+
 /// Output sync result.
 fn output_sync_result(
     cli: &Cli,
@@ -455,6 +528,7 @@ fn output_sync_result(
             total_fetched: usize,
             stopped_at_known: bool,
             has_more_history: bool,
+            history_limit_reached: bool,
             stopped_at_storage_limit: bool,
             #[serde(skip_serializing_if = "Option::is_none")]
             final_storage_bytes: Option<u64>,
@@ -469,6 +543,7 @@ fn output_sync_result(
                 total_fetched: result.total_fetched,
                 stopped_at_known: result.stopped_at_known,
                 has_more_history: result.has_more_history,
+                history_limit_reached: result.history_limit_reached,
                 stopped_at_storage_limit: result.stopped_at_storage_limit,
                 final_storage_bytes: result.final_storage_bytes,
             })
@@ -510,6 +585,14 @@ fn output_sync_result(
                 "{}More history available. Run `bird sync backfill {}` to continue.",
                 info.yellow(),
                 collection.as_str()
+            );
+        }
+
+        if result.history_limit_reached {
+            let info = if show_emoji { "ℹ️  " } else { "" };
+            println!(
+                "{}Twitter's accessible bookmark history limit was reached; all available history is stored.",
+                info.dimmed()
             );
         }
 
@@ -580,7 +663,9 @@ pub async fn run_status(cli: &Cli, show_emoji: bool) -> anyhow::Result<()> {
             ""
         };
 
-        let backfill_status = if state.has_more_history {
+        let backfill_status = if state.history_limit_reached {
+            "limited".yellow().to_string()
+        } else if state.has_more_history {
             "pending".yellow().to_string()
         } else {
             "complete".green().to_string()
@@ -655,7 +740,13 @@ pub async fn run_status(cli: &Cli, show_emoji: bool) -> anyhow::Result<()> {
         }
 
         // Backfill details
-        if state.has_more_history {
+        if state.history_limit_reached {
+            println!(
+                "    {:<18} {}",
+                "Backfill:",
+                "Twitter access limit reached".yellow()
+            );
+        } else if state.has_more_history {
             if let Some(ref cursor) = state.backfill_cursor {
                 let truncated = if cursor.len() > 30 {
                     format!("{}...", &cursor[..30])
@@ -717,4 +808,18 @@ fn format_sync_time(time: chrono::DateTime<Utc>) -> String {
     let absolute = time.format("%Y-%m-%d %H:%M UTC").to_string();
     let relative = format_relative_time(time);
     format!("{} ({})", absolute, relative)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fetch_progress_stays_cumulative_across_page_batches() {
+        let mut totals = FetchProgressTotals::default();
+
+        assert_eq!(totals.update(1, 100), (1, 100));
+        assert_eq!(totals.update(1, 97), (2, 197));
+        assert_eq!(totals.update(1, 0), (3, 197));
+    }
 }

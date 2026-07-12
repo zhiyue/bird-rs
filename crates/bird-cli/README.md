@@ -39,11 +39,14 @@ bird sync likes                # Sync liked tweets
 bird sync bookmarks            # Sync bookmarked tweets
 bird sync posts                # Sync your own tweets
 bird sync likes --full         # Full re-sync
-bird sync likes --delay 2000   # 2s between requests
+bird sync likes --delay 2000   # 2s per fetched tweet for request pacing
 bird sync backfill likes       # Continue fetching older
 bird sync status               # Show progress
 bird sync reset likes          # Clear sync state
 ```
+
+Sync stores each fetched page before requesting the next one. Interrupted runs
+therefore keep completed pages and can continue from their saved state.
 
 ### Listing Synced Tweets
 

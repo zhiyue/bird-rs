@@ -3,9 +3,11 @@
 use crate::cli::Cli;
 use bird_client::TweetData;
 use chrono::{DateTime, Local, NaiveDate};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+const EXPORT_READ_BATCH_SIZE: usize = 500;
 
 /// Supported export formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,10 +25,7 @@ impl std::str::FromStr for ExportFormat {
             "jsonl" => Ok(ExportFormat::Jsonl),
             "json" => Ok(ExportFormat::Json),
             "md" | "markdown" => Ok(ExportFormat::Md),
-            _ => Err(format!(
-                "Unknown format '{}'. Use: jsonl, json, or md",
-                s
-            )),
+            _ => Err(format!("Unknown format '{}'. Use: jsonl, json, or md", s)),
         }
     }
 }
@@ -55,10 +54,7 @@ impl std::str::FromStr for GroupBy {
         match s.to_lowercase().as_str() {
             "day" | "daily" => Ok(GroupBy::Day),
             "month" | "monthly" => Ok(GroupBy::Month),
-            _ => Err(format!(
-                "Unknown group-by '{}'. Use: day or month",
-                s
-            )),
+            _ => Err(format!("Unknown group-by '{}'. Use: day or month", s)),
         }
     }
 }
@@ -90,7 +86,9 @@ pub async fn run(
 
     // Cannot use --output with --group-by (grouped mode generates multiple files)
     if output.is_some() && grouping.is_some() {
-        anyhow::bail!("Cannot use --output with --group-by (grouped mode generates multiple files)");
+        anyhow::bail!(
+            "Cannot use --output with --group-by (grouped mode generates multiple files)"
+        );
     }
 
     // Open storage and get user_id from sync state (works offline)
@@ -100,10 +98,7 @@ pub async fn run(
         .await?
         .ok_or_else(|| anyhow::anyhow!("No synced data found. Run 'bird sync' first."))?;
 
-    // Fetch all tweets from the collection (no limit)
-    let tweets = storage
-        .get_tweets_by_collection(collection, &user_id, None, None)
-        .await?;
+    let tweets = load_all_collection_tweets(storage.as_ref(), collection, &user_id).await?;
 
     if tweets.is_empty() {
         println!(
@@ -117,6 +112,34 @@ pub async fn run(
         Some(group) => export_grouped(&tweets, collection, &fmt, group),
         None => export_single(&tweets, collection, &fmt, output),
     }
+}
+
+async fn load_all_collection_tweets(
+    storage: &dyn bird_storage::Storage,
+    collection: &str,
+    user_id: &str,
+) -> anyhow::Result<Vec<TweetData>> {
+    let tweet_ids = storage
+        .get_collection_tweet_ids(collection, user_id, None)
+        .await?;
+    let mut tweets = Vec::with_capacity(tweet_ids.len());
+
+    for id_batch in tweet_ids.chunks(EXPORT_READ_BATCH_SIZE) {
+        let ids = id_batch.iter().map(String::as_str).collect::<Vec<_>>();
+        let fetched = storage.get_tweets_by_ids(&ids).await?;
+        let mut fetched_by_id = fetched
+            .into_iter()
+            .map(|tweet| (tweet.id.clone(), tweet))
+            .collect::<HashMap<_, _>>();
+
+        for id in id_batch {
+            if let Some(tweet) = fetched_by_id.remove(id) {
+                tweets.push(tweet);
+            }
+        }
+    }
+
+    Ok(tweets)
 }
 
 /// Export all tweets to a single file (original behavior).
@@ -195,9 +218,15 @@ fn export_grouped(
         let tweet_data: Vec<TweetData> = group_tweets.iter().map(|t| (*t).clone()).collect();
 
         match fmt {
-            ExportFormat::Jsonl => { export_jsonl(&tweet_data, &file_path)?; }
-            ExportFormat::Json => { export_json(&tweet_data, &file_path)?; }
-            ExportFormat::Md => { export_md(&tweet_data, &file_path)?; }
+            ExportFormat::Jsonl => {
+                export_jsonl(&tweet_data, &file_path)?;
+            }
+            ExportFormat::Json => {
+                export_json(&tweet_data, &file_path)?;
+            }
+            ExportFormat::Md => {
+                export_md(&tweet_data, &file_path)?;
+            }
         }
 
         total_exported += count;
@@ -215,9 +244,15 @@ fn export_grouped(
         let tweet_data: Vec<TweetData> = no_date_tweets.iter().map(|t| (*t).clone()).collect();
 
         match fmt {
-            ExportFormat::Jsonl => { export_jsonl(&tweet_data, &file_path)?; }
-            ExportFormat::Json => { export_json(&tweet_data, &file_path)?; }
-            ExportFormat::Md => { export_md(&tweet_data, &file_path)?; }
+            ExportFormat::Jsonl => {
+                export_jsonl(&tweet_data, &file_path)?;
+            }
+            ExportFormat::Json => {
+                export_json(&tweet_data, &file_path)?;
+            }
+            ExportFormat::Md => {
+                export_md(&tweet_data, &file_path)?;
+            }
         }
 
         total_exported += count;
@@ -255,12 +290,19 @@ fn extract_group_key(created_at: &Option<String>, group: GroupBy) -> Option<Stri
 }
 
 /// Export tweets in JSONL format with incremental support.
-fn export_jsonl(
+fn export_jsonl(tweets: &[TweetData], path: &Path) -> anyhow::Result<(usize, usize, usize)> {
+    let mut existing_ids = read_existing_jsonl_ids(path)?;
+    append_unique_jsonl(tweets, path, &mut existing_ids)
+}
+
+pub(crate) fn append_unique_jsonl(
     tweets: &[TweetData],
-    path: &PathBuf,
+    path: &Path,
+    existing_ids: &mut HashSet<String>,
 ) -> anyhow::Result<(usize, usize, usize)> {
-    // Read existing IDs from the file (incremental)
-    let existing_ids = read_existing_jsonl_ids(path)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
 
     let mut new_count = 0usize;
     let mut skipped = 0usize;
@@ -276,6 +318,7 @@ fn export_jsonl(
         } else {
             let line = serde_json::to_string(tweet)?;
             writeln!(file, "{}", line)?;
+            existing_ids.insert(tweet.id.clone());
             new_count += 1;
         }
     }
@@ -285,7 +328,7 @@ fn export_jsonl(
 }
 
 /// Read tweet IDs from an existing JSONL file.
-fn read_existing_jsonl_ids(path: &PathBuf) -> anyhow::Result<HashSet<String>> {
+pub(crate) fn read_existing_jsonl_ids(path: &Path) -> anyhow::Result<HashSet<String>> {
     let mut ids = HashSet::new();
 
     if !path.exists() {
@@ -313,10 +356,7 @@ fn read_existing_jsonl_ids(path: &PathBuf) -> anyhow::Result<HashSet<String>> {
 }
 
 /// Export tweets as a pretty-printed JSON array (always overwrites).
-fn export_json(
-    tweets: &[TweetData],
-    path: &PathBuf,
-) -> anyhow::Result<(usize, usize, usize)> {
+fn export_json(tweets: &[TweetData], path: &PathBuf) -> anyhow::Result<(usize, usize, usize)> {
     let json = serde_json::to_string_pretty(tweets)?;
     std::fs::write(path, json)?;
     let total = tweets.len();
@@ -324,10 +364,7 @@ fn export_json(
 }
 
 /// Export tweets as Markdown (always overwrites).
-fn export_md(
-    tweets: &[TweetData],
-    path: &PathBuf,
-) -> anyhow::Result<(usize, usize, usize)> {
+fn export_md(tweets: &[TweetData], path: &PathBuf) -> anyhow::Result<(usize, usize, usize)> {
     let mut file = std::fs::File::create(path)?;
 
     writeln!(file, "# Exported Tweets")?;
@@ -336,10 +373,7 @@ fn export_md(
     for tweet in tweets {
         let author = &tweet.author;
         let date = format_timestamp(&tweet.created_at);
-        let link = format!(
-            "https://x.com/{}/status/{}",
-            author.username, tweet.id
-        );
+        let link = format!("https://x.com/{}/status/{}", author.username, tweet.id);
 
         writeln!(file, "## @{} - {}", author.username, date)?;
         writeln!(file)?;
@@ -358,15 +392,13 @@ fn export_md(
 /// Format a Twitter timestamp for display.
 fn format_timestamp(created_at: &Option<String>) -> String {
     match created_at {
-        Some(ts) => {
-            match DateTime::parse_from_str(ts, "%a %b %d %H:%M:%S %z %Y") {
-                Ok(dt) => {
-                    let local: DateTime<Local> = dt.with_timezone(&Local);
-                    local.format("%Y-%m-%d %H:%M").to_string()
-                }
-                Err(_) => ts.clone(),
+        Some(ts) => match DateTime::parse_from_str(ts, "%a %b %d %H:%M:%S %z %Y") {
+            Ok(dt) => {
+                let local: DateTime<Local> = dt.with_timezone(&Local);
+                local.format("%Y-%m-%d %H:%M").to_string()
             }
-        }
+            Err(_) => ts.clone(),
+        },
         None => "unknown date".to_string(),
     }
 }
@@ -378,4 +410,63 @@ fn default_export_path(collection: &str, format: &ExportFormat) -> PathBuf {
         .join(".bird")
         .join("exports")
         .join(format!("{}.{}", collection, format.extension()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bird_client::TweetAuthor;
+    use bird_storage::{MemoryStorage, TweetStore};
+
+    fn make_tweet(id: usize) -> TweetData {
+        TweetData {
+            id: id.to_string(),
+            text: format!("tweet {id}"),
+            author: TweetAuthor {
+                username: "tester".to_string(),
+                name: "Tester".to_string(),
+            },
+            author_id: None,
+            created_at: None,
+            reply_count: None,
+            retweet_count: None,
+            like_count: None,
+            conversation_id: None,
+            in_reply_to_status_id: None,
+            in_reply_to_user_id: None,
+            mentions: Vec::new(),
+            quoted_tweet: None,
+            retweeted_tweet: None,
+            media: None,
+            article: None,
+            headline: None,
+            _raw: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn loads_every_tweet_when_collection_exceeds_one_batch() {
+        let storage = MemoryStorage::new();
+        let expected = EXPORT_READ_BATCH_SIZE + 37;
+
+        for id in 0..expected {
+            let tweet = make_tweet(id);
+            storage.upsert_tweet(&tweet).await.unwrap();
+            storage
+                .add_to_collection(&tweet.id, "bookmarks", "user")
+                .await
+                .unwrap();
+        }
+
+        let tweets = load_all_collection_tweets(&storage, "bookmarks", "user")
+            .await
+            .unwrap();
+        let unique_ids = tweets
+            .iter()
+            .map(|tweet| tweet.id.as_str())
+            .collect::<HashSet<_>>();
+
+        assert_eq!(tweets.len(), expected);
+        assert_eq!(unique_ids.len(), expected);
+    }
 }

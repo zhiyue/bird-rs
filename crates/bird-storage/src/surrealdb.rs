@@ -264,9 +264,13 @@ struct SyncStateRecord {
     collection: String,
     user_id: String,
     newest_item_id: Option<String>,
+    #[serde(default)]
+    forward_anchor_ids: Vec<String>,
     oldest_item_id: Option<String>,
     backfill_cursor: Option<String>,
     has_more_history: bool,
+    #[serde(default)]
+    history_limit_reached: bool,
     last_sync_at: DateTime<Utc>,
     last_rate_limited_at: Option<DateTime<Utc>>,
     last_rate_limit_backoff_ms: Option<u64>,
@@ -280,9 +284,11 @@ impl From<&SyncState> for SyncStateRecord {
             collection: state.collection.clone(),
             user_id: state.user_id.clone(),
             newest_item_id: state.newest_item_id.clone(),
+            forward_anchor_ids: state.forward_anchor_ids.clone(),
             oldest_item_id: state.oldest_item_id.clone(),
             backfill_cursor: state.backfill_cursor.clone(),
             has_more_history: state.has_more_history,
+            history_limit_reached: state.history_limit_reached,
             last_sync_at: state.last_sync_at,
             last_rate_limited_at: state.last_rate_limited_at,
             last_rate_limit_backoff_ms: state.last_rate_limit_backoff_ms,
@@ -298,15 +304,121 @@ impl From<SyncStateRecord> for SyncState {
             collection: record.collection,
             user_id: record.user_id,
             newest_item_id: record.newest_item_id,
+            forward_anchor_ids: record.forward_anchor_ids,
             oldest_item_id: record.oldest_item_id,
             backfill_cursor: record.backfill_cursor,
             has_more_history: record.has_more_history,
+            history_limit_reached: record.history_limit_reached,
             last_sync_at: record.last_sync_at,
             last_rate_limited_at: record.last_rate_limited_at,
             last_rate_limit_backoff_ms: record.last_rate_limit_backoff_ms,
             last_rate_limit_retries: record.last_rate_limit_retries,
             total_synced: record.total_synced,
         }
+    }
+}
+
+#[cfg(test)]
+mod sync_state_record_tests {
+    use super::*;
+
+    fn make_tweet(id: &str) -> TweetData {
+        TweetData {
+            id: id.to_string(),
+            text: format!("tweet {}", id),
+            author: TweetAuthor {
+                username: "tester".to_string(),
+                name: "Tester".to_string(),
+            },
+            author_id: None,
+            created_at: None,
+            reply_count: None,
+            retweet_count: None,
+            like_count: None,
+            conversation_id: None,
+            in_reply_to_status_id: None,
+            in_reply_to_user_id: None,
+            mentions: Vec::new(),
+            quoted_tweet: None,
+            retweeted_tweet: None,
+            media: None,
+            article: None,
+            headline: None,
+            _raw: None,
+        }
+    }
+
+    #[test]
+    fn existing_record_without_forward_anchors_still_loads() {
+        let record: SyncStateRecord = serde_json::from_value(serde_json::json!({
+            "collection": "bookmarks",
+            "user_id": "user",
+            "newest_item_id": "1",
+            "oldest_item_id": "1",
+            "backfill_cursor": null,
+            "has_more_history": false,
+            "last_sync_at": "2026-01-01T00:00:00Z",
+            "last_rate_limited_at": null,
+            "last_rate_limit_backoff_ms": null,
+            "last_rate_limit_retries": null,
+            "total_synced": 1
+        }))
+        .unwrap();
+
+        assert!(record.forward_anchor_ids.is_empty());
+        assert!(!record.history_limit_reached);
+    }
+
+    #[tokio::test]
+    async fn history_limit_state_round_trips() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let storage = SurrealDbStorage::new(&temp_dir.path().join("bird.db"))
+            .await
+            .unwrap();
+        let mut state = SyncState::new("bookmarks", "user");
+        state.mark_history_limit_reached();
+
+        storage.update_sync_state(&state).await.unwrap();
+
+        let stored = storage
+            .get_sync_state("bookmarks", "user")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!stored.has_more_history);
+        assert!(stored.backfill_cursor.is_none());
+        assert!(stored.history_limit_reached);
+    }
+
+    #[tokio::test]
+    async fn batch_upsert_and_collection_upsert_do_not_double_count() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let storage = SurrealDbStorage::new(&temp_dir.path().join("bird.db"))
+            .await
+            .unwrap();
+        let tweet = make_tweet("1");
+
+        assert_eq!(
+            storage
+                .upsert_tweets(&[tweet.clone(), tweet.clone()])
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(storage.upsert_tweets(&[tweet]).await.unwrap(), 0);
+
+        storage
+            .add_to_collection("1", "bookmarks", "user")
+            .await
+            .unwrap();
+        storage
+            .add_to_collection("1", "bookmarks", "user")
+            .await
+            .unwrap();
+        assert_eq!(
+            storage.collection_count("bookmarks", "user").await.unwrap(),
+            1
+        );
     }
 }
 
@@ -873,14 +985,22 @@ impl TweetStore for SurrealDbStorage {
     }
 
     async fn upsert_tweets(&self, tweets: &[TweetData]) -> Result<usize> {
-        let mut new_count = 0;
+        let ids = tweets
+            .iter()
+            .map(|tweet| tweet.id.as_str())
+            .collect::<Vec<_>>();
+        let existing_ids = self
+            .filter_existing_ids(&ids)
+            .await?
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        let mut new_ids = std::collections::HashSet::new();
+        let new_count = tweets
+            .iter()
+            .filter(|tweet| !existing_ids.contains(&tweet.id) && new_ids.insert(tweet.id.clone()))
+            .count();
 
         for tweet in tweets {
-            // Check if exists
-            let exists = self.tweet_exists(&tweet.id).await?;
-            if !exists {
-                new_count += 1;
-            }
             self.upsert_tweet(tweet).await?;
         }
 
@@ -1097,40 +1217,21 @@ impl TweetStore for SurrealDbStorage {
         let user_id_owned = user_id.to_string();
         let now = Utc::now();
 
-        // Check if already exists
-        let exists = self.is_in_collection(tweet_id, collection, user_id).await?;
-
-        if exists {
-            // Update existing record
-            self.db
-                .query(
-                    "UPDATE tweet_collection SET added_at = $added_at
-                     WHERE tweet_id = $tweet_id AND collection = $collection AND user_id = $user_id"
-                )
-                .bind(("tweet_id", tweet_id_owned))
-                .bind(("collection", collection_owned))
-                .bind(("user_id", user_id_owned))
-                .bind(("added_at", now))
-                .await
-                .map_err(|e| Error::Storage(format!("Failed to update collection: {}", e)))?;
-        } else {
-            // Insert new record using CREATE (SurrealDB 2.x preferred method)
-            self.db
-                .query(
-                    "CREATE tweet_collection CONTENT {
-                        tweet_id: $tweet_id,
-                        collection: $collection,
-                        user_id: $user_id,
-                        added_at: $added_at
-                    }",
-                )
-                .bind(("tweet_id", tweet_id_owned))
-                .bind(("collection", collection_owned))
-                .bind(("user_id", user_id_owned))
-                .bind(("added_at", now))
-                .await
-                .map_err(|e| Error::Storage(format!("Failed to add to collection: {}", e)))?;
-        }
+        self.db
+            .query(
+                "UPSERT tweet_collection SET
+                    tweet_id = $tweet_id,
+                    collection = $collection,
+                    user_id = $user_id,
+                    added_at = $added_at
+                 WHERE tweet_id = $tweet_id AND collection = $collection AND user_id = $user_id",
+            )
+            .bind(("tweet_id", tweet_id_owned))
+            .bind(("collection", collection_owned))
+            .bind(("user_id", user_id_owned))
+            .bind(("added_at", now))
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to add to collection: {}", e)))?;
 
         Ok(())
     }

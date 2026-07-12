@@ -65,8 +65,11 @@ bird sync backfill likes
 bird sync status
 ```
 
-The sync is **forward-only by default**: it catches up on new items, and you can
-explicitly backfill older history over multiple sessions.
+The sync catches up on new items first, then automatically backfills older
+history in batches. Use `--no-backfill` for a forward-only run, or use
+`bird sync backfill <collection>` to continue backfilling explicitly.
+Each API page is saved before the next page is requested, so interrupted runs
+keep their completed work. `--max-pages` is a total safety ceiling for the run.
 
 ## Collections & Interleaved View
 

@@ -40,6 +40,10 @@ pub enum Error {
     #[error("Twitter API error: {0}")]
     ApiError(String),
 
+    /// Twitter stopped exposing older bookmarks at its history access limit.
+    #[error("Twitter bookmark history access limit reached")]
+    BookmarkHistoryLimitReached,
+
     /// Rate limited with optional reset timestamp.
     #[error("Rate limited by Twitter API{}", .0.map(|ts| format!(" (resets at {})", ts)).unwrap_or_default())]
     RateLimited(Option<i64>),

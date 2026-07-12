@@ -36,11 +36,11 @@ pub struct Cli {
     command: Option<Commands>,
 
     /// Twitter auth_token cookie (overrides browser extraction).
-    #[arg(long, global = true, env = "AUTH_TOKEN")]
+    #[arg(long, global = true, env = "AUTH_TOKEN", hide_env_values = true)]
     auth_token: Option<String>,
 
     /// Twitter ct0 cookie (overrides browser extraction).
-    #[arg(long, global = true, env = "CT0")]
+    #[arg(long, global = true, env = "CT0", hide_env_values = true)]
     ct0: Option<String>,
 
     /// Request timeout in milliseconds.
@@ -100,7 +100,7 @@ pub struct Cli {
     db_user: Option<String>,
 
     /// SurrealDB password.
-    #[arg(long, global = true, env = "BIRD_DB_PASS")]
+    #[arg(long, global = true, env = "BIRD_DB_PASS", hide_env_values = true)]
     db_pass: Option<String>,
 
     /// Tweet ID or URL (shorthand for `read`).
@@ -271,7 +271,7 @@ enum SyncAction {
         #[arg(long)]
         full: bool,
 
-        /// Maximum number of pages to fetch per collection (default: 10).
+        /// Maximum number of pages to fetch per collection (default: 1,000,000).
         #[arg(long)]
         max_pages: Option<u32>,
 
@@ -302,7 +302,7 @@ enum SyncAction {
         #[arg(long)]
         full: bool,
 
-        /// Maximum number of pages to fetch (default: 10).
+        /// Maximum number of pages to fetch (default: 1,000,000).
         #[arg(long)]
         max_pages: Option<u32>,
 
@@ -333,7 +333,7 @@ enum SyncAction {
         #[arg(long)]
         full: bool,
 
-        /// Maximum number of pages to fetch (default: 10).
+        /// Maximum number of pages to fetch (default: 1,000,000).
         #[arg(long)]
         max_pages: Option<u32>,
 
@@ -364,7 +364,7 @@ enum SyncAction {
         #[arg(long)]
         full: bool,
 
-        /// Maximum number of pages to fetch (default: 10).
+        /// Maximum number of pages to fetch (default: 1,000,000).
         #[arg(long)]
         max_pages: Option<u32>,
 
@@ -394,7 +394,7 @@ enum SyncAction {
         /// Collection to backfill (likes, bookmarks).
         collection: String,
 
-        /// Maximum number of pages to fetch (default: 10).
+        /// Maximum number of pages to fetch (default: 1,000,000).
         #[arg(long)]
         max_pages: Option<u32>,
 
@@ -670,7 +670,16 @@ impl Cli {
                 format,
                 output,
                 group_by,
-            }) => export::run(&self, collection, format, output.as_deref(), group_by.as_deref()).await,
+            }) => {
+                export::run(
+                    &self,
+                    collection,
+                    format,
+                    output.as_deref(),
+                    group_by.as_deref(),
+                )
+                .await
+            }
             Some(Commands::Insights { action }) => match action {
                 InsightsAction::Generate {
                     period,
@@ -909,6 +918,7 @@ pub fn extract_tweet_id(input: &str) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
     use tempfile::tempdir;
 
     fn base_cli() -> Cli {
@@ -970,6 +980,19 @@ mod tests {
     #[test]
     fn test_extract_tweet_id_invalid() {
         assert!(extract_tweet_id("not-a-valid-id").is_err());
+    }
+
+    #[test]
+    fn secret_environment_values_are_hidden_from_help() {
+        let command = Cli::command();
+
+        for id in ["auth_token", "ct0", "db_pass"] {
+            let argument = command
+                .get_arguments()
+                .find(|argument| argument.get_id().as_str() == id)
+                .unwrap();
+            assert!(argument.is_hide_env_values_set());
+        }
     }
 
     #[test]

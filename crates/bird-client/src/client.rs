@@ -10,11 +10,13 @@ use bird_core::{
 use chrono::{DateTime, Utc};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE, COOKIE, USER_AGENT};
 use reqwest::Client;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::sleep;
 use uuid::Uuid;
+
+type PaginationProgressCallback = dyn Fn(u32, usize) + Send + Sync;
 
 /// Configuration for rate limiting to avoid getting banned.
 #[derive(Debug, Clone)]
@@ -108,6 +110,7 @@ pub struct TwitterClient {
     pub(crate) client_user_id: Option<String>,
     /// Query ID manager for dynamic ID discovery.
     pub(crate) query_id_manager: Arc<QueryIdManager>,
+    pagination_progress: Option<Arc<PaginationProgressCallback>>,
 }
 
 impl TwitterClient {
@@ -154,6 +157,7 @@ impl TwitterClient {
             client_device_id: Uuid::new_v4().to_string(),
             client_user_id: None,
             query_id_manager: Arc::new(QueryIdManager::new(fallbacks)),
+            pagination_progress: None,
         }
     }
 
@@ -464,6 +468,14 @@ impl TwitterClient {
         self.client_user_id.as_deref()
     }
 
+    /// Report cumulative item and page counts while fetching paginated results.
+    pub fn set_pagination_progress_callback<F>(&mut self, callback: F)
+    where
+        F: Fn(u32, usize) + Send + Sync + 'static,
+    {
+        self.pagination_progress = Some(Arc::new(callback));
+    }
+
     /// Get a tweet by ID.
     pub async fn get_tweet(&self, tweet_id: &str) -> Result<TweetData> {
         self.get_tweet_detail(tweet_id).await
@@ -496,6 +508,7 @@ impl TwitterClient {
             },
             options,
             rate_limit,
+            self.pagination_progress.as_deref(),
         )
         .await
     }
@@ -525,6 +538,7 @@ impl TwitterClient {
             },
             options,
             rate_limit,
+            self.pagination_progress.as_deref(),
         )
         .await
     }
@@ -564,6 +578,7 @@ impl TwitterClient {
             },
             options,
             rate_limit,
+            self.pagination_progress.as_deref(),
         )
         .await
     }
@@ -652,6 +667,7 @@ impl TwitterClient {
         fetch_fn: F,
         options: &PaginationOptions,
         rate_limit: &RateLimitConfig,
+        on_page: Option<&PaginationProgressCallback>,
     ) -> Result<PaginatedResult<TweetData>>
     where
         F: Fn(Option<String>) -> Fut,
@@ -662,54 +678,84 @@ impl TwitterClient {
         let mut pages_fetched = 0u32;
         let mut stopped_at_known = false;
         let mut last_page_tweet_count = 0usize;
+        let mut items_fetched = 0usize;
+        let mut seen_cursors = HashSet::new();
+        let stop_ids = if options.stop_at_ids.is_empty() {
+            options.stop_at_id.iter().cloned().collect::<Vec<_>>()
+        } else {
+            options.stop_at_ids.clone()
+        };
 
         loop {
-            // Check max pages
-            if let Some(max) = options.max_pages {
-                if pages_fetched >= max {
-                    break;
+            if let Some(current_cursor) = &cursor {
+                if !seen_cursors.insert(current_cursor.clone()) {
+                    return Err(bird_core::Error::ApiError(
+                        "Pagination cursor repeated before a confirmed timeline end".to_string(),
+                    ));
                 }
             }
 
-            // Rate limit: random delay between pages to avoid detection
-            // Range: 1-5 seconds per page (randomized)
-            if pages_fetched > 0 && rate_limit.delay_per_tweet_ms > 0 {
-                let delay_ms: u64 = {
-                    let bytes: [u8; 8] = rand::random();
-                    1000 + (u64::from_le_bytes(bytes) % 4001) // 1000..=5000 ms
-                };
+            // Check max pages
+            if !options.fetch_all {
+                if let Some(max) = options.max_pages {
+                    if pages_fetched >= max {
+                        break;
+                    }
+                }
+            }
+
+            // Rate limit: delay based on tweets from previous page (skip on first page)
+            if pages_fetched > 0 && rate_limit.delay_per_tweet_ms > 0 && last_page_tweet_count > 0 {
+                let delay_ms = last_page_tweet_count as u64 * rate_limit.delay_per_tweet_ms;
                 sleep(Duration::from_millis(delay_ms)).await;
             }
 
             // Fetch with retry on rate limit
             let result = Self::fetch_with_backoff(&fetch_fn, cursor.clone(), rate_limit).await?;
             last_page_tweet_count = result.items.len();
+            let page_is_empty = result.items.is_empty();
+            pages_fetched += 1;
+            items_fetched += result.items.len();
+            let next_cursor = if result.has_more {
+                result.next_cursor.clone()
+            } else {
+                None
+            };
 
-            // Check for stop_at_id
-            if let Some(ref stop_id) = options.stop_at_id {
+            // Check for the configured incremental sync anchor.
+            let should_stop = if !stop_ids.is_empty() {
                 let mut should_stop = false;
                 for item in &result.items {
-                    if item.id == *stop_id {
+                    all_items.push(item.clone());
+                    if all_items.len() >= stop_ids.len()
+                        && all_items[all_items.len() - stop_ids.len()..]
+                            .iter()
+                            .zip(&stop_ids)
+                            .all(|(item, stop_id)| item.id == *stop_id)
+                    {
+                        all_items.truncate(all_items.len() - stop_ids.len());
                         stopped_at_known = true;
                         should_stop = true;
                         break;
                     }
-                    all_items.push(item.clone());
                 }
-                if should_stop {
-                    break;
-                }
+                should_stop
             } else {
                 all_items.extend(result.items);
+                false
+            };
+
+            if let Some(callback) = on_page {
+                callback(pages_fetched, items_fetched);
             }
 
-            pages_fetched += 1;
-
-            if !result.has_more {
+            if should_stop || page_is_empty {
+                cursor = None;
                 break;
             }
 
-            cursor = result.next_cursor;
+            cursor = next_cursor;
+
             if cursor.is_none() {
                 break;
             }
@@ -880,6 +926,7 @@ mod tests {
             },
             &options,
             &rate_limit,
+            None,
         )
         .await
         .unwrap();
@@ -920,12 +967,296 @@ mod tests {
             },
             &options,
             &rate_limit,
+            None,
         )
         .await
         .unwrap();
 
         assert_eq!(result.items.len(), 1);
         assert_eq!(result.items[0].id, "1");
+    }
+
+    #[tokio::test]
+    async fn fetch_all_overrides_max_pages() {
+        let pages = [
+            (
+                None,
+                PaginatedResult::new(vec![make_tweet("2")], Some("c1".to_string())),
+            ),
+            (
+                Some("c1".to_string()),
+                PaginatedResult::new(vec![make_tweet("1")], None),
+            ),
+        ];
+        let options = PaginationOptions::new().with_max_pages(1).fetch_all();
+        let rate_limit = RateLimitConfig::none();
+
+        let result = TwitterClient::fetch_all_pages_with_rate_limit(
+            |cursor| {
+                let page = pages
+                    .iter()
+                    .find(|(c, _)| c.as_ref() == cursor.as_ref())
+                    .map(|(_, page)| page.clone())
+                    .unwrap_or_else(PaginatedResult::empty);
+                async move { Ok(page) }
+            },
+            &options,
+            &rate_limit,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.items.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn fetch_all_pages_clears_cursor_after_terminal_page() {
+        let options = PaginationOptions::new().with_cursor("c1").with_max_pages(1);
+        let rate_limit = RateLimitConfig::none();
+
+        let result = TwitterClient::fetch_all_pages_with_rate_limit(
+            |cursor| {
+                let page = if cursor.as_deref() == Some("c1") {
+                    PaginatedResult::new(vec![make_tweet("1")], None)
+                } else {
+                    PaginatedResult::empty()
+                };
+                async move { Ok(page) }
+            },
+            &options,
+            &rate_limit,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.items.len(), 1);
+        assert!(result.next_cursor.is_none());
+        assert!(!result.has_more);
+    }
+
+    #[tokio::test]
+    async fn fetch_all_pages_clears_cursor_after_known_id() {
+        let pages = [
+            (
+                None,
+                PaginatedResult::new(
+                    vec![make_tweet("5"), make_tweet("4")],
+                    Some("c1".to_string()),
+                ),
+            ),
+            (
+                Some("c1".to_string()),
+                PaginatedResult::new(vec![make_tweet("3"), make_tweet("2")], None),
+            ),
+        ];
+        let options = PaginationOptions::new()
+            .with_stop_at_id("2")
+            .with_max_pages(10);
+        let rate_limit = RateLimitConfig::none();
+
+        let result = TwitterClient::fetch_all_pages_with_rate_limit(
+            |cursor| {
+                let page = pages
+                    .iter()
+                    .find(|(c, _)| c.as_ref() == cursor.as_ref())
+                    .map(|(_, p)| p.clone())
+                    .unwrap_or_else(PaginatedResult::empty);
+                async move { Ok(page) }
+            },
+            &options,
+            &rate_limit,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.items.len(), 3);
+        assert!(result.stopped_at_known);
+        assert!(result.next_cursor.is_none());
+        assert!(!result.has_more);
+    }
+
+    #[tokio::test]
+    async fn fetch_all_pages_matches_anchor_sequence_across_pages() {
+        let pages = [
+            (
+                None,
+                PaginatedResult::new(
+                    vec![make_tweet("new"), make_tweet("a")],
+                    Some("c1".to_string()),
+                ),
+            ),
+            (
+                Some("c1".to_string()),
+                PaginatedResult::new(
+                    vec![make_tweet("b"), make_tweet("c"), make_tweet("old")],
+                    None,
+                ),
+            ),
+        ];
+        let options = PaginationOptions::new()
+            .with_stop_at_ids(vec!["a".to_string(), "b".to_string(), "c".to_string()])
+            .with_max_pages(10);
+        let rate_limit = RateLimitConfig::none();
+
+        let result = TwitterClient::fetch_all_pages_with_rate_limit(
+            |cursor| {
+                let page = pages
+                    .iter()
+                    .find(|(c, _)| c.as_ref() == cursor.as_ref())
+                    .map(|(_, p)| p.clone())
+                    .unwrap_or_else(PaginatedResult::empty);
+                async move { Ok(page) }
+            },
+            &options,
+            &rate_limit,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].id, "new");
+        assert!(result.stopped_at_known);
+    }
+
+    #[tokio::test]
+    async fn fetch_all_pages_does_not_stop_at_moved_first_anchor() {
+        let options = PaginationOptions::new()
+            .with_stop_at_ids(vec!["a".to_string(), "b".to_string(), "c".to_string()])
+            .with_max_pages(10);
+        let rate_limit = RateLimitConfig::none();
+
+        let result = TwitterClient::fetch_all_pages_with_rate_limit(
+            |_| async {
+                Ok(PaginatedResult::new(
+                    vec![
+                        make_tweet("a"),
+                        make_tweet("new"),
+                        make_tweet("b"),
+                        make_tweet("c"),
+                    ],
+                    None,
+                ))
+            },
+            &options,
+            &rate_limit,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result
+                .items
+                .iter()
+                .map(|tweet| tweet.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "new", "b", "c"]
+        );
+        assert!(!result.stopped_at_known);
+    }
+
+    #[tokio::test]
+    async fn fetch_all_pages_reports_progress_after_each_page() {
+        let pages = [
+            (
+                None,
+                PaginatedResult::new(
+                    vec![make_tweet("3"), make_tweet("2")],
+                    Some("c1".to_string()),
+                ),
+            ),
+            (
+                Some("c1".to_string()),
+                PaginatedResult::new(vec![make_tweet("1")], None),
+            ),
+        ];
+        let options = PaginationOptions::new().with_max_pages(10);
+        let rate_limit = RateLimitConfig::none();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let recorded_events = Arc::clone(&events);
+        let on_page = move |page, items| {
+            recorded_events.lock().unwrap().push((page, items));
+        };
+
+        TwitterClient::fetch_all_pages_with_rate_limit(
+            |cursor| {
+                let page = pages
+                    .iter()
+                    .find(|(c, _)| c.as_ref() == cursor.as_ref())
+                    .map(|(_, p)| p.clone())
+                    .unwrap_or_else(PaginatedResult::empty);
+                async move { Ok(page) }
+            },
+            &options,
+            &rate_limit,
+            Some(&on_page),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(*events.lock().unwrap(), vec![(1, 2), (2, 3)]);
+    }
+
+    #[tokio::test]
+    async fn fetch_all_pages_stops_after_empty_page_with_cursor() {
+        let options = PaginationOptions::new().with_max_pages(1_000_000);
+        let rate_limit = RateLimitConfig::none();
+        let calls = Arc::new(Mutex::new(0));
+        let recorded_calls = Arc::clone(&calls);
+
+        let result = TwitterClient::fetch_all_pages_with_rate_limit(
+            move |cursor| {
+                *recorded_calls.lock().unwrap() += 1;
+                let page = match cursor.as_deref() {
+                    None => {
+                        PaginatedResult::new(vec![make_tweet("1")], Some("empty-page".to_string()))
+                    }
+                    Some("empty-page") => {
+                        PaginatedResult::new(Vec::new(), Some("another-cursor".to_string()))
+                    }
+                    _ => panic!("pagination continued after an empty page"),
+                };
+                async move { Ok(page) }
+            },
+            &options,
+            &rate_limit,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(*calls.lock().unwrap(), 2);
+        assert_eq!(result.items.len(), 1);
+        assert!(result.next_cursor.is_none());
+        assert!(!result.has_more);
+    }
+
+    #[tokio::test]
+    async fn fetch_all_pages_rejects_repeated_cursor() {
+        let options = PaginationOptions::new()
+            .with_cursor("same-cursor")
+            .with_max_pages(10);
+        let rate_limit = RateLimitConfig::none();
+
+        let error = TwitterClient::fetch_all_pages_with_rate_limit(
+            |_| async {
+                Ok(PaginatedResult::new(
+                    vec![make_tweet("1")],
+                    Some("same-cursor".to_string()),
+                ))
+            },
+            &options,
+            &rate_limit,
+            None,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(error, bird_core::Error::ApiError(_)));
     }
 }
 

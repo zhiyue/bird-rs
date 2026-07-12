@@ -291,10 +291,8 @@ impl QueryIdManager {
         ];
 
         // Find chunk name → ID mapping: e.g. 83988:"shared~bundle.BookmarkFolders~bundle.Bookmarks"
-        let chunk_name_pattern = Regex::new(
-            r#"(\d+):"((?:shared~)?(?:bundle\.Bookmark[A-Za-z~.]*))""#,
-        )
-        .unwrap();
+        let chunk_name_pattern =
+            Regex::new(r#"(\d+):"((?:shared~)?(?:bundle\.Bookmark[A-Za-z~.]*))""#).unwrap();
 
         // Find chunk ID → hash mapping: e.g. 83988:"eb51986"
         // This appears in the webpack runtime as part of the chunk hash mapping object

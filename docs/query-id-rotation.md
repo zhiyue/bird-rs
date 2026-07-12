@@ -205,7 +205,7 @@ async fn discover_query_ids() -> Result<HashMap<String, String>> {
 
 ### Option C: Hybrid with CLI Refresh Command
 
-**Approach:** Add a `bird query-ids refresh` command that users can run
+**Approach:** Add a `bird-rs query-ids refresh` command that users can run
 manually.
 
 **Pros:**

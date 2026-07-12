@@ -5,7 +5,7 @@ similar to how likes and bookmarks are synced.
 
 ## Overview
 
-The `bird sync following` command will fetch and persist the list of Twitter
+The `bird-rs sync following` command will fetch and persist the list of Twitter
 accounts you follow. This differs from likes/bookmarks in that it syncs
 **users** rather than **tweets**.
 
@@ -332,10 +332,10 @@ Params: user_id, count, cursor, skip_status=true, include_user_entities=false
 1. **Unit tests** for user parsing from GraphQL response
 2. **Integration tests** for storage operations
 3. **Manual testing:**
-   - `bird sync following` - initial sync
-   - `bird sync following` - incremental sync
-   - `bird sync following --full` - full re-sync
-   - `bird sync status` - verify following appears in status
+   - `bird-rs sync following` - initial sync
+   - `bird-rs sync following` - incremental sync
+   - `bird-rs sync following --full` - full re-sync
+   - `bird-rs sync status` - verify following appears in status
 
 ---
 
@@ -529,7 +529,7 @@ bird insights authors
 **Phase 1: Core Following Sync** (MVP)
 
 - API client, storage, sync engine, basic CLI
-- Enables `bird sync following`
+- Enables `bird-rs sync following`
 
 **Phase 2: Cross-Collection Queries**
 
@@ -539,5 +539,5 @@ bird insights authors
 
 **Phase 3: Insights Integration**
 
-- `bird insights authors` command
+- `bird-rs insights authors` command
 - Integration with existing resonance scoring

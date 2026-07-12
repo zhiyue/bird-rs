@@ -1,7 +1,7 @@
 # bird-tui
 
 A terminal user interface (TUI) for browsing and exploring your synced tweets
-from the bird database.
+from the bird-rs database.
 
 ## Features
 
@@ -109,10 +109,10 @@ Before using bird-tui, ensure you have synced tweets to your database:
 
 ```bash
 # Sync your likes
-bird sync likes
+bird-rs sync likes
 
 # Sync your bookmarks
-bird sync bookmarks
+bird-rs sync bookmarks
 
 # Or run bird-tui to see available data
 bird-tui
@@ -145,7 +145,7 @@ If no tweets are found, the TUI will display an empty state with instructions.
 
 ### "No tweets found"
 
-- Have you synced tweets? Run `bird sync likes` or `bird sync bookmarks` first
+- Have you synced tweets? Run `bird-rs sync likes` or `bird-rs sync bookmarks` first
 - Check that tweets are in the correct collections
 
 ### Database connection errors

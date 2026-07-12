@@ -774,7 +774,7 @@ impl SyncEngine {
         })
     }
 
-    /// Perform backfill sync explicitly (for `bird sync backfill likes`).
+    /// Perform backfill sync explicitly (for `bird-rs sync backfill likes`).
     pub async fn backfill_collection(
         &self,
         collection: Collection,
@@ -809,7 +809,7 @@ impl SyncEngine {
             None => {
                 // No sync state, need to do initial sync first
                 Err(anyhow::anyhow!(
-                    "No sync state found. Run `bird sync {}` first.",
+                    "No sync state found. Run `bird-rs sync {}` first.",
                     collection.as_str()
                 ))
             }

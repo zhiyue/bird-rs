@@ -4533,6 +4533,7 @@ dependencies = [
 [[package]]
 name = "sweet-cookie"
 version = "0.1.0"
+source = "git+https://github.com/kevinmichaelchen/sweet-cookie-rs?rev=273e208c21ccdbc041486c674db28d41dddd7c20#273e208c21ccdbc041486c674db28d41dddd7c20"
 dependencies = [
  "chrono",
  "thiserror 2.0.18",

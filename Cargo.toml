@@ -13,7 +13,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Kevin Chen"]
 license = "MIT"
-repository = "https://github.com/kevinmichaelchen/bird-rs"
+repository = "https://github.com/zhiyue/bird-rs"
 
 [workspace.dependencies]
 # Internal crates
@@ -41,7 +41,7 @@ clap = { version = "4", features = ["derive", "env"] }
 colored = "2"
 
 # Cookie extraction
-sweet-cookie = { path = "../sweet-cookie-rs" }
+sweet-cookie = { git = "https://github.com/kevinmichaelchen/sweet-cookie-rs", rev = "273e208c21ccdbc041486c674db28d41dddd7c20" }
 
 # Database
 surrealdb = { version = "2", features = ["kv-rocksdb", "protocol-http"] }

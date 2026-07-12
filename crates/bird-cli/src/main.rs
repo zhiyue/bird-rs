@@ -1,4 +1,4 @@
-//! bird - A fast X/Twitter CLI for reading tweets
+//! bird-rs - A fast X/Twitter CLI for reading tweets
 
 use bird_cli::cli::Cli;
 use clap::Parser;

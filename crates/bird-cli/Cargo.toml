@@ -10,7 +10,7 @@ keywords = ["twitter", "x", "cli", "graphql", "social-media"]
 categories = ["command-line-utilities", "web-programming"]
 
 [[bin]]
-name = "bird"
+name = "bird-rs"
 path = "src/main.rs"
 
 [dependencies]

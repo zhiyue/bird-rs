@@ -1,4 +1,4 @@
-//! CLI interface for bird.
+//! CLI interface for bird-rs.
 
 use crate::commands::{bookmarks, config, db, export, insights, likes, list, read, sync, whoami};
 use bird_client::cookies::{check_available_sources, resolve_credentials};
@@ -14,23 +14,23 @@ use std::sync::Arc;
 
 /// A fast X/Twitter CLI for reading tweets.
 #[derive(Parser)]
-#[command(name = "bird")]
+#[command(name = "bird-rs")]
 #[command(author, version, about, long_about = None)]
 #[command(after_help = "Examples:
-  bird whoami                    Show the logged-in account
-  bird read 1234567890           Read a tweet by ID
-  bird 1234567890                Shorthand for read
-  bird check                     Show available credential sources
-  bird likes                     Fetch your likes
-  bird likes --all               Fetch all pages of likes
-  bird bookmarks --max-pages 5   Fetch up to 5 pages of bookmarks
-  bird sync likes                Sync likes to local database
-  bird db backfill-created-at    Backfill created_at_ts for existing tweets
-  bird --config ~/.bird/config.toml sync likes
-  bird config init               Create a default config file
-  bird sync status               Show sync state
-  bird insights generate         Analyze tweets for insights
-  bird insights generate week    Analyze tweets from the last week")]
+  bird-rs whoami                    Show the logged-in account
+  bird-rs read 1234567890           Read a tweet by ID
+  bird-rs 1234567890                Shorthand for read
+  bird-rs check                     Show available credential sources
+  bird-rs likes                     Fetch your likes
+  bird-rs likes --all               Fetch all pages of likes
+  bird-rs bookmarks --max-pages 5   Fetch up to 5 pages of bookmarks
+  bird-rs sync likes                Sync likes to local database
+  bird-rs db backfill-created-at    Backfill created_at_ts for existing tweets
+  bird-rs --config ~/.bird/config.toml sync likes
+  bird-rs config init               Create a default config file
+  bird-rs sync status               Show sync state
+  bird-rs insights generate         Analyze tweets for insights
+  bird-rs insights generate week    Analyze tweets from the last week")]
 pub struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -943,6 +943,11 @@ mod tests {
             db_pass: None,
             tweet_id: None,
         }
+    }
+
+    #[test]
+    fn command_name_matches_installed_binary() {
+        assert_eq!(Cli::command().get_name(), "bird-rs");
     }
 
     #[test]

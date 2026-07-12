@@ -263,7 +263,7 @@ pub async fn run_status(cli: &Cli, show_emoji: bool, debug: bool) -> anyhow::Res
             println!(
                 "  {:<26} {}",
                 "No valid timestamps:",
-                "run `bird db backfill-created-at`".yellow()
+                "run `bird-rs db backfill-created-at`".yellow()
             );
         } else {
             println!("  {}", "Top timestamps by frequency:".dimmed());
@@ -493,7 +493,7 @@ pub async fn run_repair(
     println!("{}Repair complete! ✨", icon.bold().green());
     println!(
         "Use {} to see results.",
-        "bird list --columns id,headline,collections,score".cyan()
+        "bird-rs list --columns id,headline,collections,score".cyan()
     );
 
     Ok(())

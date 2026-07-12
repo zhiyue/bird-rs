@@ -5,7 +5,7 @@ use crate::output::format_json;
 use colored::Colorize;
 use std::fs;
 
-const DEFAULT_CONFIG: &str = r#"# bird config
+const DEFAULT_CONFIG: &str = r#"# bird-rs config
 [storage]
 backend = "surrealdb"
 # db_path = "~/.bird/bird.db"

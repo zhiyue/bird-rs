@@ -582,7 +582,7 @@ fn output_sync_result(
         if result.has_more_history && !result.stopped_at_storage_limit {
             let info = if show_emoji { "📚 " } else { "" };
             println!(
-                "{}More history available. Run `bird sync backfill {}` to continue.",
+                "{}More history available. Run `bird-rs sync backfill {}` to continue.",
                 info.yellow(),
                 collection.as_str()
             );

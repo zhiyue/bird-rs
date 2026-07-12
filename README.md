@@ -1,51 +1,59 @@
-# bird
+# bird-rs
 
 A fast X/Twitter CLI for reading and syncing tweets. Written in Rust.
 
 ## Install
 
+Homebrew:
+
 ```bash
-cargo install --path crates/bird-cli
+brew install zhiyue/tap/bird-rs
+```
+
+From source:
+
+```bash
+cargo install --git https://github.com/zhiyue/bird-rs --package bird-cli --locked
 ```
 
 ## Quick Start
 
 ```bash
 # Authenticate (auto-extracts Safari cookies on macOS)
-bird whoami
+bird-rs whoami
 
 # Read a tweet
-bird 1234567890123456789
-bird https://x.com/user/status/1234567890123456789
+bird-rs 1234567890123456789
+bird-rs https://x.com/user/status/1234567890123456789
 
 # Fetch your likes
-bird likes --max-pages 3
+bird-rs likes --max-pages 3
 
 # Sync likes to local database
-bird sync likes
+bird-rs sync likes
 ```
 
 ## Commands
 
 | Command                  | Description                                                            |
 | ------------------------ | ---------------------------------------------------------------------- |
-| `bird <id>`              | Read a tweet by ID or URL                                              |
-| `bird whoami`            | Show logged-in account                                                 |
-| `bird likes`             | Fetch your liked tweets                                                |
-| `bird bookmarks`         | Fetch your bookmarks                                                   |
-| `bird list`              | List all synced tweets (interleaved from likes, bookmarks, posts)      |
-| `bird list likes`        | List synced likes from DB                                              |
-| `bird list bookmarks`    | List synced bookmarks from DB                                          |
-| `bird list user_tweets`  | List synced posts from DB                                              |
-| `bird sync likes`        | Sync likes to local DB                                                 |
-| `bird sync bookmarks`    | Sync bookmarks to local DB                                             |
-| `bird sync posts`        | Sync your own tweets to DB                                             |
-| `bird sync status`       | Show sync progress                                                     |
-| `bird db repair`         | Heal missing data: backfill headlines and recalculate resonance scores |
-| `bird insights generate` | Analyze tweets with LLM                                                |
-| `bird db status`         | Show database status and counts                                        |
-| `bird db optimize`       | Ensure schema and indexes exist                                        |
-| `bird config init`       | Write a default config file                                            |
+| `bird-rs <id>`              | Read a tweet by ID or URL                                              |
+| `bird-rs whoami`            | Show logged-in account                                                 |
+| `bird-rs likes`             | Fetch your liked tweets                                                |
+| `bird-rs bookmarks`         | Fetch your bookmarks                                                   |
+| `bird-rs list`              | List all synced tweets (interleaved from likes, bookmarks, posts)      |
+| `bird-rs list likes`        | List synced likes from DB                                              |
+| `bird-rs list bookmarks`    | List synced bookmarks from DB                                          |
+| `bird-rs list user_tweets`  | List synced posts from DB                                              |
+| `bird-rs sync likes`        | Sync likes to local DB                                                 |
+| `bird-rs sync bookmarks`    | Sync bookmarks to local DB                                             |
+| `bird-rs sync posts`        | Sync your own tweets to DB                                             |
+| `bird-rs sync status`       | Show sync progress                                                     |
+| `bird-rs db repair`         | Heal missing data: backfill headlines and recalculate resonance scores |
+| `bird-rs insights generate` | Analyze tweets with LLM                                                |
+| `bird-rs db status`         | Show database status and counts                                        |
+| `bird-rs db optimize`       | Ensure schema and indexes exist                                        |
+| `bird-rs config init`       | Write a default config file                                            |
 
 ## Sync
 
@@ -54,50 +62,50 @@ offline access and incremental sync.
 
 ```bash
 # Sync your likes, bookmarks, or own posts
-bird sync likes
-bird sync bookmarks
-bird sync posts
+bird-rs sync likes
+bird-rs sync bookmarks
+bird-rs sync posts
 
 # Continue fetching older tweets (explicit backfill)
-bird sync backfill likes
+bird-rs sync backfill likes
 
 # Check progress
-bird sync status
+bird-rs sync status
 ```
 
 The sync catches up on new items first, then automatically backfills older
 history in batches. Use `--no-backfill` for a forward-only run, or use
-`bird sync backfill <collection>` to continue backfilling explicitly.
+`bird-rs sync backfill <collection>` to continue backfilling explicitly.
 Each API page is saved before the next page is requested, so interrupted runs
 keep their completed work. `--max-pages` is a total safety ceiling for the run.
 
 ## Collections & Interleaved View
 
-By default, `bird list` shows an **interleaved view** of all your collections
+By default, `bird-rs list` shows an **interleaved view** of all your collections
 (likes, bookmarks, posts) in a single list, deduplicated and ordered by earliest
 discovery time:
 
 ```bash
 # Show all collections interleaved (default)
-bird list
+bird-rs list
 
 # Pagination works across all collections
-bird list --page 2
+bird-rs list --page 2
 
 # Show only a specific collection (backward compatible)
-bird list likes
-bird list bookmarks
-bird list user_tweets
+bird-rs list likes
+bird-rs list bookmarks
+bird-rs list user_tweets
 ```
 
 Use the `collections` column to see which collections contain each tweet:
 
 ```bash
 # Show collection membership (❤️ for likes, 🔖 for bookmarks, 📝 for posts)
-bird list --columns id,text,collections
+bird-rs list --columns id,text,collections
 
 # Combine with scores and other data
-bird list --columns id,text,collections,liked,bookmarked,score
+bird-rs list --columns id,text,collections,liked,bookmarked,score
 ```
 
 ## Insights
@@ -107,22 +115,22 @@ concepts, people, and resources you've been exploring.
 
 ```bash
 # Analyze tweets from the last week (default)
-bird insights generate
+bird-rs insights generate
 
 # Analyze different time periods
-bird insights generate day
-bird insights generate week
-bird insights generate month
+bird-rs insights generate day
+bird-rs insights generate week
+bird-rs insights generate month
 
 # Filter by collection
-bird insights generate --collection likes
-bird insights generate --collection bookmarks
+bird-rs insights generate --collection likes
+bird-rs insights generate --collection bookmarks
 
 # Limit tweets analyzed
-bird insights generate --max-tweets 50
+bird-rs insights generate --max-tweets 50
 
 # Show verbose output
-bird insights generate -v
+bird-rs insights generate -v
 ```
 
 The insights command uses Claude Code by default (requires the `claude` CLI).
@@ -133,10 +141,10 @@ To heal missing data (backfill headlines and refresh resonance scores):
 
 ```bash
 # All-in-one: backfill headlines and recalculate resonance scores
-bird db repair
+bird-rs db repair
 
 # Or backfill headlines only with custom options
-bird db backfill-headlines --max-tweets 100 --min-length 200
+bird-rs db backfill-headlines --max-tweets 100 --min-length 200
 ```
 
 ## Resonance Scores
@@ -165,20 +173,20 @@ The score is calculated as: **base × active_multiplier × synergy_multiplier**
 First, compute resonance scores from your synced data:
 
 ```bash
-bird resonance refresh
+bird-rs resonance refresh
 ```
 
 Then view scores across all collections:
 
 ```bash
 # Show all tweets with scores and interaction counts
-bird list --columns id,text,liked,bookmarked,score
+bird-rs list --columns id,text,liked,bookmarked,score
 
 # View tweets from a specific collection with scores
-bird list likes --columns id,text,score
+bird-rs list likes --columns id,text,score
 
 # Include collection membership (which collections contain each tweet)
-bird list --columns id,text,collections,score
+bird-rs list --columns id,text,collections,score
 ```
 
 ### Available Columns
@@ -199,13 +207,13 @@ bird list --columns id,text,collections,score
 Scores are cached locally. After syncing new tweets:
 
 ```bash
-bird resonance refresh
+bird-rs resonance refresh
 ```
 
 To backfill missing headlines and recalculate all scores in one command:
 
 ```bash
-bird db repair
+bird-rs db repair
 ```
 
 Resonance scores run fully offline and require no external API calls.
@@ -217,7 +225,7 @@ By default, Bird uses an embedded SurrealDB (RocksDB) database at
 remote endpoint and optional credentials:
 
 ```bash
-bird sync likes \
+bird-rs sync likes \
   --db-url "wss://cloud.surrealdb.com" \
   --db-namespace bird \
   --db-name main \
@@ -242,7 +250,7 @@ export BIRD_DB_PASS="your_pass"
 For testing, you can use in-memory storage:
 
 ```bash
-bird --storage memory sync likes
+bird-rs --storage memory sync likes
 ```
 
 ## Config File
@@ -266,9 +274,9 @@ For local storage, you can set `db_path` instead of `db_url`.
 Generate a starter config with:
 
 ```bash
-bird config init
+bird-rs config init
 # Overwrite existing file
-bird config init --force
+bird-rs config init --force
 ```
 
 ## Authentication
@@ -281,7 +289,7 @@ export AUTH_TOKEN=your_auth_token
 export CT0=your_ct0_token
 
 # Or CLI flags
-bird --auth-token TOKEN --ct0 CT0 whoami
+bird-rs --auth-token TOKEN --ct0 CT0 whoami
 ```
 
 ## Technical Notes

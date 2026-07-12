@@ -409,7 +409,7 @@ fn render_empty(f: &mut Frame, _app: &App) {
         .border_type(ratatui::widgets::BorderType::Rounded);
 
     let paragraph = Paragraph::new(
-        "No tweets found. Try syncing with `bird sync likes` or `bird sync bookmarks`.",
+        "No tweets found. Try syncing with `bird-rs sync likes` or `bird-rs sync bookmarks`.",
     )
     .alignment(Alignment::Center)
     .wrap(Wrap { trim: true });

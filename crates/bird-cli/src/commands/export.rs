@@ -96,13 +96,13 @@ pub async fn run(
     let user_id = storage
         .get_any_synced_user_id()
         .await?
-        .ok_or_else(|| anyhow::anyhow!("No synced data found. Run 'bird sync' first."))?;
+        .ok_or_else(|| anyhow::anyhow!("No synced data found. Run 'bird-rs sync' first."))?;
 
     let tweets = load_all_collection_tweets(storage.as_ref(), collection, &user_id).await?;
 
     if tweets.is_empty() {
         println!(
-            "No tweets found in '{}'. Run 'bird sync {}' first.",
+            "No tweets found in '{}'. Run 'bird-rs sync {}' first.",
             collection, collection
         );
         return Ok(());
